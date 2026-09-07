@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sideralis</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44'/><path d='m13.56 11.747 4.332-.924'/><path d='m16 21-3.105-6.21'/><path d='M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455z'/><path d='m6.158 8.633 1.114 4.456'/><path d='m8 21 3.105-6.21'/><circle cx='12' cy='13' r='2'/></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="boot"><div class="barw"><div class="bar" id="bootbar"></div></div></div>
+<div id="rotate-overlay" class="hidden">
+  <div id="rotate-content">
+    <svg id="rotate-icon" viewBox="0 0 64 64" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="16" y="8" width="32" height="48" rx="4"/>
+      <circle cx="32" cy="48" r="3" fill="#38bdf8" stroke="none"/>
+      <path d="M8 24 L16 20 L16 28 Z" fill="#38bdf8" stroke="none"/>
+    </svg>
+    <p id="rotate-text">Please rotate your phone to portrait</p>
+  </div>
+</div>
+<div id="sel"></div>
+<div id="ipanel" aria-hidden="true"><div id="ipanel-head"><span id="ipanel-title"></span></div><div id="ipanel-body"></div><div id="ipanel-foot"><button id="ipanel-close" type="button"></button></div></div>
+<div id="spanel" aria-hidden="true"><div id="spanel-head"><span id="spanel-title">Search body</span></div><div id="spanel-body"><input id="search-input" type="text" placeholder="Type body name or id..." autocomplete="off" spellcheck="false"><div id="search-results"></div></div><div id="spanel-foot"><button id="spanel-close" type="button"></button></div></div>
+<div id="fps"></div>
+<canvas id="c"></canvas>
+<canvas id="labels"></canvas>
+<footer id="bar"><button id="home" type="button"></button><button id="search" type="button"></button><button id="orbits" type="button"></button><button id="fullscreen" type="button"></button><button id="info" type="button"></button><button id="speed" type="button"></button></footer>
+<script src="js/data.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/boot.js"></script>
+<script src="js/input.js"></script>
+<script src="js/rotate.js"></script>
+</body>
+</html>
