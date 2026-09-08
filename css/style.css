@@ -78,9 +78,16 @@ canvas {
   inset: 0;
   background: #000;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 28px;
   z-index: 100;
+}
+#boot-banner {
+  width: min(420px, 80vw);
+  height: auto;
+  display: block;
 }
 #boot .barw {
   width: min(420px, 80vw);
@@ -93,7 +100,7 @@ canvas {
 #boot .bar {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  background: linear-gradient(90deg, #F808F8, #F8F8F8);
 }
 #boot.err .bar {
   background: #f87171;
@@ -166,10 +173,10 @@ body.orientation-locked #labels {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 12px;
+  bottom: clamp(8px, 4vw, 12px);
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: clamp(3px, 1.4vw, 8px);
   z-index: 20;
   pointer-events: none;
 }
@@ -179,7 +186,9 @@ body.orientation-locked #labels {
   left: 0;
   right: 0;
   z-index: 40;
-  background: rgba(8, 10, 16, .94);
+  background: rgba(8, 10, 16, .8);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
   color: #fff;
   border-bottom: 1px solid #4a5568;
   transform: translateY(-102%);
@@ -313,20 +322,20 @@ body.orientation-locked #labels {
 }
 #bar button {
   pointer-events: auto;
-  background: rgba(0, 0, 0, .55);
+  background: rgba(8, 10, 16, .95);
   border: 1px solid #4a5568;
   border-radius: 8px;
   color: #fff;
-  padding: 8px;
+  padding: clamp(5px, 2vw, 8px);
   cursor: pointer;
   display: flex;
   font: inherit;
 }
 #bar button.off {
-  opacity: .4;
+  color: rgba(255, 255, 255, .4);
 }
 #bar button:disabled {
-  opacity: .4;
+  color: rgba(255, 255, 255, .4);
 }
 @media (hover: hover) {
   #bar button:hover:not(.off):not(:disabled) {
@@ -334,8 +343,8 @@ body.orientation-locked #labels {
   }
 }
 #bar svg {
-  width: 20px;
-  height: 20px;
+  width: clamp(15px, 5.5vw, 20px);
+  height: clamp(15px, 5.5vw, 20px);
   display: block;
 }
 #spanel {
@@ -344,7 +353,9 @@ body.orientation-locked #labels {
   left: 0;
   right: 0;
   z-index: 40;
-  background: rgba(8, 10, 16, .94);
+  background: rgba(8, 10, 16, .8);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
   color: #fff;
   border-bottom: 1px solid #4a5568;
   transform: translateY(-102%);
