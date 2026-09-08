@@ -788,26 +788,32 @@
   }
   updateOrbitalPositions()
   const SPH_SEGS = 16
-  const sphBaseGrid = []
-  for(let cf=0;cf<6;cf++){
-    const grid = []
-    for(let siy=0;siy<=SPH_SEGS;siy++){
-      const svv = siy / SPH_SEGS * 2 - 1
-      for(let six=0;six<=SPH_SEGS;six++){
-        const suu = six / SPH_SEGS * 2 - 1
-        let sqx = 0, sqy = 0, sqz = 0
-        if(cf===0){ sqx=1; sqy=suu; sqz=svv }
-        else if(cf===1){ sqx=-1; sqy=suu; sqz=svv }
-        else if(cf===2){ sqx=suu; sqy=1; sqz=svv }
-        else if(cf===3){ sqx=suu; sqy=-1; sqz=svv }
-        else if(cf===4){ sqx=suu; sqy=svv; sqz=1 }
-        else { sqx=suu; sqy=svv; sqz=-1 }
-        const sql = Math.hypot(sqx, sqy, sqz)
-        grid.push(sqx/sql, sqy/sql, sqz/sql)
+  const PROC_SEGS = 6
+  function sphGridFor(segs){
+    const g = []
+    for(let cf=0;cf<6;cf++){
+      const grid = []
+      for(let siy=0;siy<=segs;siy++){
+        const svv = siy / segs * 2 - 1
+        for(let six=0;six<=segs;six++){
+          const suu = six / segs * 2 - 1
+          let sqx = 0, sqy = 0, sqz = 0
+          if(cf===0){ sqx=1; sqy=suu; sqz=svv }
+          else if(cf===1){ sqx=-1; sqy=suu; sqz=svv }
+          else if(cf===2){ sqx=suu; sqy=1; sqz=svv }
+          else if(cf===3){ sqx=suu; sqy=-1; sqz=svv }
+          else if(cf===4){ sqx=suu; sqy=svv; sqz=1 }
+          else { sqx=suu; sqy=svv; sqz=-1 }
+          const sql = Math.hypot(sqx, sqy, sqz)
+          grid.push(sqx/sql, sqy/sql, sqz/sql)
+        }
       }
+      g.push(grid)
     }
-    sphBaseGrid.push(grid)
+    return g
   }
+  const sphBaseGrid = sphGridFor(SPH_SEGS)
+  const sphProcGrid = sphGridFor(PROC_SEGS)
   function planetBasis(pax, pay, paz, prx, pry, prz, out){
     const d = prx*pax+pry*pay+prz*paz
     let ux = prx-pax*d, uy = pry-pay*d, uz = prz-paz*d
@@ -818,13 +824,14 @@
     out[6]=uy*paz-uz*pay; out[7]=uz*pax-ux*paz; out[8]=ux*pay-uy*pax
   }
   const PLANET_NV = 6 * (SPH_SEGS + 1) * (SPH_SEGS + 1)
-  function planetIndexArray(){
+  const PROC_NV = 6 * (PROC_SEGS + 1) * (PROC_SEGS + 1)
+  function planetIndexArray(segs){
     const iArr = []
-    const gstride = SPH_SEGS + 1
+    const gstride = segs + 1
     for(let cf=0;cf<6;cf++){
       const sbase = cf * gstride * gstride
-      for(let siy=0;siy<SPH_SEGS;siy++){
-        for(let six=0;six<SPH_SEGS;six++){
+      for(let siy=0;siy<segs;siy++){
+        for(let six=0;six<segs;six++){
           const vA = sbase + siy*gstride+six
           const vB = vA+1
           const vC = vA+gstride
@@ -835,23 +842,23 @@
     }
     return iArr
   }
-  function planetDirArray(){
+  function planetDirArray(grid){
     const dArr = []
     for(let cf=0;cf<6;cf++){
-      const grid = sphBaseGrid[cf]
-      for(let k=0;k<grid.length;k+=3){
-        dArr.push(grid[k], grid[k+1], grid[k+2])
+      const g = grid[cf]
+      for(let k=0;k<g.length;k+=3){
+        dArr.push(g[k], g[k+1], g[k+2])
       }
     }
     return dArr
   }
-  function planetPosFill(pBuf, b){
+  function planetPosFill(pBuf, grid, b){
     let o = 0
     const ux=b[0], uy=b[1], uz=b[2], px=b[3], py=b[4], pz=b[5], vx=b[6], vy=b[7], vz=b[8]
     for(let cf=0;cf<6;cf++){
-      const grid = sphBaseGrid[cf]
-      for(let k=0;k<grid.length;k+=3){
-        const ex = grid[k], ey = grid[k+1], ez = grid[k+2]
+      const g = grid[cf]
+      for(let k=0;k<g.length;k+=3){
+        const ex = g[k], ey = g[k+1], ez = g[k+2]
         pBuf[o++]=ux*ex+px*ey+vx*ez; pBuf[o++]=uy*ex+py*ey+vy*ez; pBuf[o++]=uz*ex+pz*ey+vz*ez
       }
     }
@@ -860,9 +867,9 @@
     const b = new Float64Array(9)
     planetBasis(pax, pay, paz, prx, pry, prz, b)
     const pBuf = new Float32Array(PLANET_NV * 3)
-    planetPosFill(pBuf, b)
-    const dBuf = new Float32Array(planetDirArray())
-    const iBuf = new Uint32Array(planetIndexArray())
+    planetPosFill(pBuf, sphBaseGrid, b)
+    const dBuf = new Float32Array(planetDirArray(sphBaseGrid))
+    const iBuf = new Uint32Array(planetIndexArray(SPH_SEGS))
     const vao = gl.createVertexArray()
     gl.bindVertexArray(vao)
     const pb = gl.createBuffer()
@@ -885,7 +892,7 @@
   function planetVAOUpdate(e, pax, pay, paz, prx, pry, prz){
     const b = new Float64Array(9)
     planetBasis(pax, pay, paz, prx, pry, prz, b)
-    planetPosFill(e.pBuf, b)
+    planetPosFill(e.pBuf, sphBaseGrid, b)
     gl.bindBuffer(gl.ARRAY_BUFFER, e.pb)
     gl.bufferData(gl.ARRAY_BUFFER, e.pBuf, gl.DYNAMIC_DRAW)
     e.frame[0]=b[0]; e.frame[1]=b[3]; e.frame[2]=b[6]
@@ -932,7 +939,7 @@
     }
     return s / n
   }
-  function procStaticShape(seed, qArr){
+  function procStaticShape(seed, qArr, grid){
     const rnd = procRand(seed || 1)
     const elong = 1.00 + rnd() * 0.33
     const mid = 0.85 + rnd() * 0.25
@@ -954,9 +961,9 @@
     const sd = seed || 1
     let o = 0
     for(let cf=0;cf<6;cf++){
-      const grid = sphBaseGrid[cf]
-      for(let k=0;k<grid.length;k+=3){
-        const ex = grid[k], ey = grid[k+1], ez = grid[k+2]
+      const g = grid[cf]
+      for(let k=0;k<g.length;k+=3){
+        const ex = g[k], ey = g[k+1], ez = g[k+2]
         let h = (procFbm(ex * 2.3 + ox, ey * 2.3 + oy, ez * 2.3 + oz, sd) - 0.5) * 0.30
         for(let ci = 0; ci < nCr; ci++){
           const cosang = ex * crx[ci] + ey * cry[ci] + ez * crz[ci]
@@ -1024,13 +1031,13 @@
   function buildProceduralVAO(pax, pay, paz, prx, pry, prz, seed){
     const b = new Float64Array(9)
     planetBasis(pax, pay, paz, prx, pry, prz, b)
-    const nv = PLANET_NV
+    const nv = PROC_NV
     const qArr = new Float64Array(nv * 3)
-    procStaticShape(seed, qArr)
+    procStaticShape(seed, qArr, sphProcGrid)
     const pBuf = new Float32Array(nv * 3)
     procPosFill(pBuf, qArr, b)
-    const dBuf = new Float32Array(planetDirArray())
-    const idx = new Uint32Array(planetIndexArray())
+    const dBuf = new Float32Array(planetDirArray(sphProcGrid))
+    const idx = new Uint32Array(planetIndexArray(PROC_SEGS))
     const nxA = new Float64Array(nv * 3)
     procNormalsAccum(pBuf, idx, nxA)
     const groups = procWeldGroups(pBuf, nv)
@@ -1660,10 +1667,14 @@
   let animEndDist = 5.76
   let animActive = false
   let animStartTime = 0
+  const coarsePtr = window.matchMedia ? window.matchMedia('(pointer:coarse)').matches : false
+  const TOUCH_MIN_R = 24
   function pick(mx, my){
     const w = canvas.width
     const h = canvas.height
     const f = proj[5]
+    const cssScale = w / (canvas.clientWidth || 1)
+    const minRad = coarsePtr ? TOUCH_MIN_R * cssScale : 8
     let best = -1
     let bestD = 1e9
     for(let i=0;i<N;i++){
@@ -1695,7 +1706,7 @@
       if(ps > 6) ps = 6
       let rad = pr
       if(pr < ps) rad = ps
-      if(rad < 8) rad = 8
+      if(rad < minRad) rad = minRad
       if(d2 < rad*rad){
         const d = Math.hypot(ndcx, ndcy)
         if(d2 < bestD){ bestD = d2; best = i }
