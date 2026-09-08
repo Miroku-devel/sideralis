@@ -67,15 +67,13 @@ void main(){
   sc = -9.1 + (sc + 5.0) * 0.05;
   vec2 suv = v_quad * sc;
   float s = cheap_star(suv, anim);
-  vec3 col = s * vec3(1.0);
-  if(isSun) col *= (0.85 + 0.15 * sin(st * 6.0)) * u_sunFade;
-  if(isWhite) col *= 0.85 + 0.15 * sin(st * 6.0);
-  float lum = max(col.r, max(col.g, col.b));
+  float tw = isSun ? (0.85 + 0.15 * sin(st * 6.0)) * u_sunFade : 0.85 + 0.15 * sin(st * 6.0);
+  float lum = s * tw;
   float d = length(v_quad);
   float fade = 1.0 - smoothstep(0.55, 1.0, d);
   float a = clamp(lum, 0.0, 1.0) * fade;
   if(a < 0.004) discard;
-  outColor = vec4(col * fade, a);
+  outColor = vec4(vec3(1.0) * fade, a);
 }`
 const vsPoint = `#version 300 es
 in vec3 a_pos;
@@ -124,14 +122,13 @@ void main(){
     sc = -9.1 + (sc + 5.0) * 0.05;
     vec2 suv = c * sc;
     float s = cheap_star(suv, anim);
-    vec3 col = s * vec3(1.0);
-    col *= 0.85 + 0.15 * sin(st * 6.0);
-    float lum = max(col.r, max(col.g, col.b));
+    float tw = 0.85 + 0.15 * sin(st * 6.0);
+    float lum = s * tw;
     float d = length(c);
     float fade = 1.0 - smoothstep(0.55, 1.0, d);
     float a = clamp(lum, 0.0, 1.0) * fade;
     if(a < 0.004) discard;
-    outColor = vec4(col * fade, a);
+    outColor = vec4(vec3(1.0) * fade, a);
     return;
   }
   float d = length(c);
@@ -256,12 +253,11 @@ void main(){
   float sc = 2.0 * (cos(st * 2.0) - 2.5);
   sc = -9.1 + (sc + 5.0) * 0.05;
   float s = cheap_star(v_quad * sc, anim);
-  vec3 scol = s * vec3(1.0);
-  scol *= 0.85 + 0.15 * sin(st * 6.0);
-  float slum = max(scol.r, max(scol.g, scol.b));
+  float tw = 0.85 + 0.15 * sin(st * 6.0);
+  float slum = s * tw;
   float sFade = 1.0 - smoothstep(0.55, 1.0, d);
   float sa = clamp(slum, 0.0, 1.0) * sFade;
-  vec3 sout = scol * sFade;
+  vec3 sout = vec3(1.0) * sFade;
   vec3 outc = mix(iw, sout, u_starMix);
   float outa = mix(ia, sa, u_starMix);
   if(outa < 0.004 * u_starMix) discard;
