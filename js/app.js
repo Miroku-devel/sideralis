@@ -249,6 +249,13 @@
   function rockyTint(id){
     return ROCKY_TINTS[hashStr(id) % ROCKY_TINTS.length]
   }
+  const WHITE3 = [1.0, 1.0, 1.0]
+  const bodyColorCache = new Array(N).fill(null)
+  function bodyColor(i){
+    let c = bodyColorCache[i]
+    if(!c){ c = getColor(bodies[i]); bodyColorCache[i] = c }
+    return c
+  }
   function bodyRadiusKm(b){
     let r = b.meanRadius_km
     if(r === '' || r === undefined || r === null) r = 1
@@ -290,13 +297,13 @@
   gl.vertexAttribDivisor(locQuad, 0)
   const pbuf = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, pbuf)
-  gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
   gl.enableVertexAttribArray(locPos)
   gl.vertexAttribPointer(locPos, 3, gl.FLOAT, false, 0, 0)
   gl.vertexAttribDivisor(locPos, 1)
   const rbufQ = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, rbufQ)
-  gl.bufferData(gl.ARRAY_BUFFER, radData, gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, radData, gl.DYNAMIC_DRAW)
   gl.enableVertexAttribArray(locRadius)
   gl.vertexAttribPointer(locRadius, 1, gl.FLOAT, false, 0, 0)
   gl.vertexAttribDivisor(locRadius, 1)
@@ -311,7 +318,7 @@
   gl.bindVertexArray(vaoP)
   const pbufP = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, pbufP)
-  gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
   gl.enableVertexAttribArray(locPosP)
   gl.vertexAttribPointer(locPosP, 3, gl.FLOAT, false, 0, 0)
   const cbufP = gl.createBuffer()
@@ -565,7 +572,7 @@
   gl.bindVertexArray(lineVao)
   const lbuf = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, lbuf)
-  gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.DYNAMIC_DRAW)
   gl.enableVertexAttribArray(locPosL)
   gl.vertexAttribPointer(locPosL, 3, gl.FLOAT, false, 0, 0)
   gl.bindVertexArray(null)
@@ -591,13 +598,14 @@
         const M0 = op.m0 + op.n * orbitalTime
         const E0 = solveKepler(M0, op.e)
         const nu = 2 * Math.atan2(Math.sqrt(1+op.e)*Math.sin(E0/2), Math.sqrt(1-op.e)*Math.cos(E0/2))
+        const pe2 = 1 - op.e * op.e
         for(let s=0;s<segCount;s++){
           const nuA = nu + s * Math.PI * 2 / segCount
           const nuB = nu + (s+1) * Math.PI * 2 / segCount
-          const rA = op.a * (1 - op.e*op.e) / (1 + op.e * Math.cos(nuA))
-          const rB = op.a * (1 - op.e*op.e) / (1 + op.e * Math.cos(nuB))
           const cA = Math.cos(nuA), sA = Math.sin(nuA)
           const cB = Math.cos(nuB), sB = Math.sin(nuB)
+          const rA = op.a * pe2 / (1 + op.e * cA)
+          const rB = op.a * pe2 / (1 + op.e * cB)
           lineRaw[off]   = cx + op.ex*rA*cA + op.bx*rA*sA
           lineRaw[off+1] = cy + op.ey*rA*cA + op.by*rA*sA
           lineRaw[off+2] = cz + op.ez*rA*cA + op.bz*rA*sA
@@ -633,7 +641,7 @@
       lineData[li+2] = lineRaw[li+2] - lineOrigin[2]
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, lbuf)
-    gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.DYNAMIC_DRAW)
   }
   function refreshOrigin(){
     for(let pi=0;pi<posRaw.length;pi+=3){
@@ -648,13 +656,11 @@
       axisData[ai+2]=axisRaw[ai+2]-lineOrigin[2]
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, pbuf)
-    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
     gl.bindBuffer(gl.ARRAY_BUFFER, pbufP)
-    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
-    gl.bindBuffer(gl.ARRAY_BUFFER, lbuf)
-    gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
     gl.bindBuffer(gl.ARRAY_BUFFER, abuf)
-    gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.DYNAMIC_DRAW)
     gl.bindVertexArray(null)
   }
   const axisPos = []
@@ -691,7 +697,7 @@
   gl.bindVertexArray(axisVao)
   const abuf = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, abuf)
-  gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.DYNAMIC_DRAW)
   gl.enableVertexAttribArray(locPosL)
   gl.vertexAttribPointer(locPosL, 3, gl.FLOAT, false, 0, 0)
   gl.bindVertexArray(null)
@@ -712,8 +718,9 @@
       refreshOrigin()
   function updateOrbitalPositions(){
     const now = performance.now()
-    const dt = (now - lastFrameTime) / 1000
+    const dtRaw = (now - lastFrameTime) / 1000
     lastFrameTime = now
+    const dt = dtRaw > 0.05 ? 0.05 : (dtRaw < 0 ? 0 : dtRaw)
     const running = window.ANIM_RUNNING !== false
     const fast = window.ANIM_FAST === true
     const mult = fast ? (typeof window.ANIM_FAST_MULT === 'number' && window.ANIM_FAST_MULT > 0 ? window.ANIM_FAST_MULT : FAST_MULT) : 1
@@ -753,9 +760,9 @@
       posData[pi+2] = posRaw[pi+2] - lineOrigin[2]
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, pbuf)
-    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
     gl.bindBuffer(gl.ARRAY_BUFFER, pbufP)
-    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
   }
   function updateAxisLines(){
     for(let ai=0;ai<axisMeta.length;ai++){
@@ -776,7 +783,7 @@
     }
     if(axisData.length > 0){
       gl.bindBuffer(gl.ARRAY_BUFFER, abuf)
-      gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.STATIC_DRAW)
+      gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.DYNAMIC_DRAW)
     }
   }
   updateOrbitalPositions()
@@ -801,24 +808,21 @@
     }
     sphBaseGrid.push(grid)
   }
-  function buildPlanetVAO(pax, pay, paz, prx, pry, prz){
-    let d = prx*pax+pry*pay+prz*paz
+  function planetBasis(pax, pay, paz, prx, pry, prz, out){
+    const d = prx*pax+pry*pay+prz*paz
     let ux = prx-pax*d, uy = pry-pay*d, uz = prz-paz*d
     const ul = Math.hypot(ux, uy, uz) || 1
     ux/=ul; uy/=ul; uz/=ul
-    const vx = uy*paz-uz*pay, vy = uz*pax-ux*paz, vz = ux*pay-uy*pax
-    const pArr = []
-    const dArr = []
+    out[0]=ux; out[1]=uy; out[2]=uz
+    out[3]=pax; out[4]=pay; out[5]=paz
+    out[6]=uy*paz-uz*pay; out[7]=uz*pax-ux*paz; out[8]=ux*pay-uy*pax
+  }
+  const PLANET_NV = 6 * (SPH_SEGS + 1) * (SPH_SEGS + 1)
+  function planetIndexArray(){
     const iArr = []
     const gstride = SPH_SEGS + 1
     for(let cf=0;cf<6;cf++){
-      const grid = sphBaseGrid[cf]
-      const sbase = pArr.length / 3
-      for(let k=0;k<grid.length;k+=3){
-        const ex = grid[k], ey = grid[k+1], ez = grid[k+2]
-        pArr.push(ux*ex+pax*ey+vx*ez, uy*ex+pay*ey+vy*ez, uz*ex+paz*ey+vz*ez)
-        dArr.push(ex, ey, ez)
-      }
+      const sbase = cf * gstride * gstride
       for(let siy=0;siy<SPH_SEGS;siy++){
         for(let six=0;six<SPH_SEGS;six++){
           const vA = sbase + siy*gstride+six
@@ -829,14 +833,41 @@
         }
       }
     }
-    const pBuf = new Float32Array(pArr)
-    const dBuf = new Float32Array(dArr)
-    const iBuf = new Uint32Array(iArr)
+    return iArr
+  }
+  function planetDirArray(){
+    const dArr = []
+    for(let cf=0;cf<6;cf++){
+      const grid = sphBaseGrid[cf]
+      for(let k=0;k<grid.length;k+=3){
+        dArr.push(grid[k], grid[k+1], grid[k+2])
+      }
+    }
+    return dArr
+  }
+  function planetPosFill(pBuf, b){
+    let o = 0
+    const ux=b[0], uy=b[1], uz=b[2], px=b[3], py=b[4], pz=b[5], vx=b[6], vy=b[7], vz=b[8]
+    for(let cf=0;cf<6;cf++){
+      const grid = sphBaseGrid[cf]
+      for(let k=0;k<grid.length;k+=3){
+        const ex = grid[k], ey = grid[k+1], ez = grid[k+2]
+        pBuf[o++]=ux*ex+px*ey+vx*ez; pBuf[o++]=uy*ex+py*ey+vy*ez; pBuf[o++]=uz*ex+pz*ey+vz*ez
+      }
+    }
+  }
+  function buildPlanetVAO(pax, pay, paz, prx, pry, prz){
+    const b = new Float64Array(9)
+    planetBasis(pax, pay, paz, prx, pry, prz, b)
+    const pBuf = new Float32Array(PLANET_NV * 3)
+    planetPosFill(pBuf, b)
+    const dBuf = new Float32Array(planetDirArray())
+    const iBuf = new Uint32Array(planetIndexArray())
     const vao = gl.createVertexArray()
     gl.bindVertexArray(vao)
     const pb = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, pb)
-    gl.bufferData(gl.ARRAY_BUFFER, pBuf, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, pBuf, gl.DYNAMIC_DRAW)
     gl.enableVertexAttribArray(locPosS)
     gl.vertexAttribPointer(locPosS, 3, gl.FLOAT, false, 0, 0)
     const db = gl.createBuffer()
@@ -848,8 +879,18 @@
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib)
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, iBuf, gl.STATIC_DRAW)
     gl.bindVertexArray(null)
-    const frame = new Float32Array([ux, pax, vx, uy, pay, vy, uz, paz, vz])
-    return {vao: vao, count: iArr.length, frame: frame}
+    const frame = new Float32Array([b[0], b[3], b[6], b[1], b[4], b[7], b[2], b[5], b[8]])
+    return {vao: vao, count: iBuf.length, frame: frame, pb: pb, pBuf: pBuf, kind: 0}
+  }
+  function planetVAOUpdate(e, pax, pay, paz, prx, pry, prz){
+    const b = new Float64Array(9)
+    planetBasis(pax, pay, paz, prx, pry, prz, b)
+    planetPosFill(e.pBuf, b)
+    gl.bindBuffer(gl.ARRAY_BUFFER, e.pb)
+    gl.bufferData(gl.ARRAY_BUFFER, e.pBuf, gl.DYNAMIC_DRAW)
+    e.frame[0]=b[0]; e.frame[1]=b[3]; e.frame[2]=b[6]
+    e.frame[3]=b[1]; e.frame[4]=b[4]; e.frame[5]=b[7]
+    e.frame[6]=b[2]; e.frame[7]=b[5]; e.frame[8]=b[8]
   }
   const PROC_AST = new Set(['phobos','deimos','proteus','nereid','hyperion','phoebe','larissa','janus','himalia','amalthea','galatea','despina','epimetheus','thebe','prometheus','pandora','thalassa','naiad','metis','hydra','helene','nix','atlas','pan','adrastea','kerberos','styx'])
   const SUN_AXIS = [0.122353, -0.031038, 0.992001]
@@ -891,12 +932,7 @@
     }
     return s / n
   }
-  function buildProceduralVAO(pax, pay, paz, prx, pry, prz, seed){
-    let d = prx*pax+pry*pay+prz*paz
-    let ux = prx-pax*d, uy = pry-pay*d, uz = prz-paz*d
-    const ul = Math.hypot(ux, uy, uz) || 1
-    ux/=ul; uy/=ul; uz/=ul
-    const vx = uy*paz-uz*pay, vy = uz*pax-ux*paz, vz = ux*pay-uy*pax
+  function procStaticShape(seed, qArr){
     const rnd = procRand(seed || 1)
     const elong = 1.00 + rnd() * 0.33
     const mid = 0.85 + rnd() * 0.25
@@ -907,87 +943,104 @@
       const st = axes[si]; axes[si] = axes[sj]; axes[sj] = st
     }
     const nCr = 3 + Math.floor(rnd() * 7)
-    const craters = []
+    const crx = [], cry = [], crz = [], crr = [], crd = []
     for(let ci = 0; ci < nCr; ci++){
       let cx = rnd() * 2 - 1, cy = rnd() * 2 - 1, cz = rnd() * 2 - 1
       const cl = Math.hypot(cx, cy, cz) || 1
-      craters.push({x: cx / cl, y: cy / cl, z: cz / cl, rho: 0.15 + rnd() * 0.40, depth: 0.05 + rnd() * 0.20})
+      crx.push(cx / cl); cry.push(cy / cl); crz.push(cz / cl)
+      crr.push(0.15 + rnd() * 0.40); crd.push(0.05 + rnd() * 0.20)
     }
     const ox = rnd() * 10, oy = rnd() * 10, oz = rnd() * 10
-    const pArr = []
-    const dArr = []
-    const iArr = []
-    const gstride = SPH_SEGS + 1
+    const sd = seed || 1
+    let o = 0
     for(let cf=0;cf<6;cf++){
       const grid = sphBaseGrid[cf]
-      const sbase = pArr.length / 3
       for(let k=0;k<grid.length;k+=3){
         const ex = grid[k], ey = grid[k+1], ez = grid[k+2]
-        let h = (procFbm(ex * 2.3 + ox, ey * 2.3 + oy, ez * 2.3 + oz, seed || 1) - 0.5) * 0.30
-        for(let ci = 0; ci < craters.length; ci++){
-          const cr = craters[ci]
-          const cosang = ex * cr.x + ey * cr.y + ez * cr.z
-          const cosrho = Math.cos(cr.rho)
+        let h = (procFbm(ex * 2.3 + ox, ey * 2.3 + oy, ez * 2.3 + oz, sd) - 0.5) * 0.30
+        for(let ci = 0; ci < nCr; ci++){
+          const cosang = ex * crx[ci] + ey * cry[ci] + ez * crz[ci]
+          const cosrho = Math.cos(crr[ci])
           if(cosang > cosrho){
             const t = (cosang - cosrho) / (1 - cosrho)
             const bowl = t * t * (3 - 2 * t)
-            h -= cr.depth * bowl
+            h -= crd[ci] * bowl
             const rim = Math.exp(-Math.pow((1 - t) * 4.0, 2))
-            h += cr.depth * 0.35 * rim
+            h += crd[ci] * 0.35 * rim
           }
         }
         let r = 1 + h
         if(r < 0.72) r = 0.72
         else if(r > 1.35) r = 1.35
-        const qx = ex * axes[0] * r, qy = ey * axes[1] * r, qz = ez * axes[2] * r
-        pArr.push(ux*qx+pax*qy+vx*qz, uy*qx+pay*qy+vy*qz, uz*qx+paz*qy+vz*qz)
-        dArr.push(ex, ey, ez)
-      }
-      for(let siy=0;siy<SPH_SEGS;siy++){
-        for(let six=0;six<SPH_SEGS;six++){
-          const vA = sbase + siy*gstride+six
-          const vB = vA+1
-          const vC = vA+gstride
-          const vD = vC+1
-          iArr.push(vA,vC,vB, vB,vC,vD)
-        }
+        qArr[o++]=ex * axes[0] * r; qArr[o++]=ey * axes[1] * r; qArr[o++]=ez * axes[2] * r
       }
     }
-    const nv = pArr.length / 3
-    const nxA = new Float64Array(pArr.length)
-    for(let ti = 0; ti < iArr.length; ti += 3){
-      const a3 = iArr[ti] * 3, b3 = iArr[ti+1] * 3, c3 = iArr[ti+2] * 3
-      const abx = pArr[b3]-pArr[a3], aby = pArr[b3+1]-pArr[a3+1], abz = pArr[b3+2]-pArr[a3+2]
-      const acx = pArr[c3]-pArr[a3], acy = pArr[c3+1]-pArr[a3+1], acz = pArr[c3+2]-pArr[a3+2]
-      let fnx = aby*acz-abz*acy, fny = abz*acx-abx*acz, fnz = abx*acy-aby*acx
+  }
+  function procNormalsAccum(pBuf, idx, nxA){
+    nxA.fill(0)
+    for(let ti = 0; ti < idx.length; ti += 3){
+      const a3 = idx[ti] * 3, b3 = idx[ti+1] * 3, c3 = idx[ti+2] * 3
+      const abx = pBuf[b3]-pBuf[a3], aby = pBuf[b3+1]-pBuf[a3+1], abz = pBuf[b3+2]-pBuf[a3+2]
+      const acx = pBuf[c3]-pBuf[a3], acy = pBuf[c3+1]-pBuf[a3+1], acz = pBuf[c3+2]-pBuf[a3+2]
+      const fnx = aby*acz-abz*acy, fny = abz*acx-abx*acz, fnz = abx*acy-aby*acx
       nxA[a3]+=fnx; nxA[a3+1]+=fny; nxA[a3+2]+=fnz
       nxA[b3]+=fnx; nxA[b3+1]+=fny; nxA[b3+2]+=fnz
       nxA[c3]+=fnx; nxA[c3+1]+=fny; nxA[c3+2]+=fnz
     }
+  }
+  function procWeldGroups(pBuf, nv){
     const weld = new Map()
     for(let vi = 0; vi < nv; vi++){
-      const key = Math.round(pArr[vi*3]*1e4)+','+Math.round(pArr[vi*3+1]*1e4)+','+Math.round(pArr[vi*3+2]*1e4)
+      const key = Math.round(pBuf[vi*3]*1e4)+','+Math.round(pBuf[vi*3+1]*1e4)+','+Math.round(pBuf[vi*3+2]*1e4)
       let e = weld.get(key)
-      if(!e){ e = {x: 0, y: 0, z: 0, ids: []}; weld.set(key, e) }
-      e.x += nxA[vi*3]; e.y += nxA[vi*3+1]; e.z += nxA[vi*3+2]
-      e.ids.push(vi)
+      if(!e){ e = []; weld.set(key, e) }
+      e.push(vi)
     }
-    const nArr = new Float32Array(pArr.length)
-    weld.forEach(function(e){
-      const l = Math.hypot(e.x, e.y, e.z) || 1
-      const wx = e.x / l, wy = e.y / l, wz = e.z / l
-      for(let qi = 0; qi < e.ids.length; qi++){
-        nArr[e.ids[qi]*3] = wx; nArr[e.ids[qi]*3+1] = wy; nArr[e.ids[qi]*3+2] = wz
+    const groups = []
+    weld.forEach(function(ids){ groups.push(ids) })
+    return groups
+  }
+  function procNormalsAverage(nxA, groups, nBuf){
+    for(let gi = 0; gi < groups.length; gi++){
+      const ids = groups[gi]
+      let sx = 0, sy = 0, sz = 0
+      for(let qi = 0; qi < ids.length; qi++){
+        sx += nxA[ids[qi]*3]; sy += nxA[ids[qi]*3+1]; sz += nxA[ids[qi]*3+2]
       }
-    })
-    const pBuf = new Float32Array(pArr)
-    const dBuf = new Float32Array(dArr)
-    const iBuf = new Uint32Array(iArr)
+      const l = Math.hypot(sx, sy, sz) || 1
+      const wx = sx / l, wy = sy / l, wz = sz / l
+      for(let qi = 0; qi < ids.length; qi++){
+        nBuf[ids[qi]*3] = wx; nBuf[ids[qi]*3+1] = wy; nBuf[ids[qi]*3+2] = wz
+      }
+    }
+  }
+  function procPosFill(pBuf, qArr, b){
+    const ux=b[0], uy=b[1], uz=b[2], px=b[3], py=b[4], pz=b[5], vx=b[6], vy=b[7], vz=b[8]
+    for(let o=0;o<qArr.length;o+=3){
+      const qx = qArr[o], qy = qArr[o+1], qz = qArr[o+2]
+      pBuf[o]=ux*qx+px*qy+vx*qz; pBuf[o+1]=uy*qx+py*qy+vy*qz; pBuf[o+2]=uz*qx+pz*qy+vz*qz
+    }
+  }
+  function buildProceduralVAO(pax, pay, paz, prx, pry, prz, seed){
+    const b = new Float64Array(9)
+    planetBasis(pax, pay, paz, prx, pry, prz, b)
+    const nv = PLANET_NV
+    const qArr = new Float64Array(nv * 3)
+    procStaticShape(seed, qArr)
+    const pBuf = new Float32Array(nv * 3)
+    procPosFill(pBuf, qArr, b)
+    const dBuf = new Float32Array(planetDirArray())
+    const idx = new Uint32Array(planetIndexArray())
+    const nxA = new Float64Array(nv * 3)
+    procNormalsAccum(pBuf, idx, nxA)
+    const groups = procWeldGroups(pBuf, nv)
+    const nBuf = new Float32Array(nv * 3)
+    procNormalsAverage(nxA, groups, nBuf)
     const vao = gl.createVertexArray()
     gl.bindVertexArray(vao)
     const pb = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, pb)
-    gl.bufferData(gl.ARRAY_BUFFER, pBuf, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, pBuf, gl.DYNAMIC_DRAW)
     gl.enableVertexAttribArray(locPosS)
     gl.vertexAttribPointer(locPosS, 3, gl.FLOAT, false, 0, 0)
     const db = gl.createBuffer()
@@ -997,15 +1050,29 @@
     gl.vertexAttribPointer(locDir0S, 3, gl.FLOAT, false, 0, 0)
     const nb = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, nb)
-    gl.bufferData(gl.ARRAY_BUFFER, nArr, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, nBuf, gl.DYNAMIC_DRAW)
     gl.enableVertexAttribArray(2)
     gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0)
     const ib = gl.createBuffer()
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib)
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, iBuf, gl.STATIC_DRAW)
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW)
     gl.bindVertexArray(null)
-    const frame = new Float32Array([ux, pax, vx, uy, pay, vy, uz, paz, vz])
-    return {vao: vao, count: iArr.length, frame: frame}
+    const frame = new Float32Array([b[0], b[3], b[6], b[1], b[4], b[7], b[2], b[5], b[8]])
+    return {vao: vao, count: idx.length, frame: frame, pb: pb, nb: nb, pBuf: pBuf, nBuf: nBuf, nxA: nxA, qArr: qArr, idx: idx, groups: groups, kind: 1}
+  }
+  function procVAOUpdate(e, pax, pay, paz, prx, pry, prz){
+    const b = new Float64Array(9)
+    planetBasis(pax, pay, paz, prx, pry, prz, b)
+    procPosFill(e.pBuf, e.qArr, b)
+    gl.bindBuffer(gl.ARRAY_BUFFER, e.pb)
+    gl.bufferData(gl.ARRAY_BUFFER, e.pBuf, gl.DYNAMIC_DRAW)
+    procNormalsAccum(e.pBuf, e.idx, e.nxA)
+    procNormalsAverage(e.nxA, e.groups, e.nBuf)
+    gl.bindBuffer(gl.ARRAY_BUFFER, e.nb)
+    gl.bufferData(gl.ARRAY_BUFFER, e.nBuf, gl.DYNAMIC_DRAW)
+    e.frame[0]=b[0]; e.frame[1]=b[3]; e.frame[2]=b[6]
+    e.frame[3]=b[1]; e.frame[4]=b[4]; e.frame[5]=b[7]
+    e.frame[6]=b[2]; e.frame[7]=b[5]; e.frame[8]=b[8]
   }
   const meshPlanets = []
   for(let mpi=0;mpi<N;mpi++){
@@ -1281,7 +1348,13 @@
   const SAT_FAR_KM = 50000000
   const SAT_FAR_FULL_KM = 30000000
   let lastLabelKey = ''
-  if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { lastLabelKey = '' })
+  const labelWidthCache = new Map()
+  function labelWidth(name){
+    let w = labelWidthCache.get(name)
+    if(w === undefined){ w = lctx.measureText(name).width; labelWidthCache.set(name, w) }
+    return w
+  }
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { lastLabelKey = ''; labelWidthCache.clear() })
   let planetRing = false
   const satIdx = []
   for(let si=0;si<N;si++){ if(bodies[si].aroundPlanet) satIdx.push(si) }
@@ -1449,7 +1522,7 @@
     }
     for(let k=0;k<pItems.length;k++){
       const it = pItems[k]
-      const tw = lctx.measureText(it.name).width
+      const tw = labelWidth(it.name)
       if(it.ox !== undefined){
         lctx.globalAlpha = it.a * 0.4
         lctx.lineWidth = Math.max(1, dpr * 0.75)
@@ -1465,7 +1538,7 @@
     sItems.sort((a, b) => a.dist - b.dist)
     for(let k=0;k<sItems.length;k++){
       const it = sItems[k]
-      const tw = lctx.measureText(it.name).width
+      const tw = labelWidth(it.name)
       const bx0 = it.x - tw * 0.5 - cpad
       const bx1 = it.x + tw * 0.5 + cpad
       const by0 = it.y - fs - cpad
@@ -1922,8 +1995,8 @@
     gl.disable(gl.BLEND)
     gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-    const mc = getColor(bodies[mi])
-    const mcw = PROC_AST.has(bodies[mi].id) ? rockyTint(bodies[mi].id) : [1.0, 1.0, 1.0]
+    const mc = bodyColor(mi)
+    const mcw = PROC_AST.has(bodies[mi].id) ? rockyTint(bodies[mi].id) : WHITE3
     const mtx = meshTex[mi]
     let done = false
     if(typeof window.PATMO !== 'undefined' && PATMO.capture){
@@ -1955,7 +2028,7 @@
     gl.generateMipmap(gl.TEXTURE_2D)
     return true
   }
-  function drawImpostors(ex, ey, ez){
+  function drawImpostors(ex, ey, ez, onlyStars){
     if(!impProgOk) return
     gl.depthMask(true)
     gl.useProgram(progImp)
@@ -1991,6 +2064,13 @@
       const ddz = mpz - ez
       const med = Math.hypot(ddx, ddy, ddz)
       if(mi === sunIdx ? !(med > mrr * sunImpR && med <= mrr * sunStarR * 1.2) : !(med > mrr * MESH_R)) continue
+      let starMix = 0
+      if(mi !== sunIdx && mrr > 0){
+        let sm = (med - mrr * IMP_STAR_R0) / Math.max(mrr * (IMP_STAR_R1 - IMP_STAR_R0), 1e-12)
+        sm = sm < 0 ? 0 : (sm > 1 ? 1 : sm)
+        starMix = sm * sm * (3 - 2 * sm)
+      }
+      if(onlyStars ? starMix <= 0.001 : starMix > 0.001) continue
       const idl = Math.hypot(ddx, ddy, ddz) || 1
       const ndx = ddx / idl
       const ndy = ddy / idl
@@ -2020,12 +2100,6 @@
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, impTex[mi])
       gl.uniform3f(locCenterImp, mpx, mpy, mpz)
-      let starMix = 0
-      if(mi !== sunIdx && mrr > 0){
-        let sm = (med - mrr * IMP_STAR_R0) / Math.max(mrr * (IMP_STAR_R1 - IMP_STAR_R0), 1e-12)
-        sm = sm < 0 ? 0 : (sm > 1 ? 1 : sm)
-        starMix = sm * sm * (3 - 2 * sm)
-      }
       gl.uniform1f(locRadiusImp, irr)
       if(locStarMixImp) gl.uniform1f(locStarMixImp, starMix)
       if(locCutoutImp) gl.uniform1f(locCutoutImp, procAst ? 1 : 0)
@@ -2128,7 +2202,7 @@
       radQuad[sunIdx] = smed > sEdge0 ? radData[sunIdx] * 2 : 0
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, rbufQ)
-    gl.bufferData(gl.ARRAY_BUFFER, radQuad, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, radQuad, gl.DYNAMIC_DRAW)
     ensureSceneFB()
     if(sceneFbOk) gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo)
     gl.clearColor(0,0,0,1)
@@ -2187,7 +2261,9 @@
           const rrX = rX*cR + (ax*dot)*(1-cR) + (ay*rZ - az*rY)*sR
           const rrY = rY*cR + (ay*dot)*(1-cR) + (az*rX - ax*rZ)*sR
           const rrZ = rZ*cR + (az*dot)*(1-cR) + (ax*rY - ay*rX)*sR
-          planetVAO[mi] = buildPlanetVAO(ax, ay, az, rrX, rrY, rrZ)
+          const meM = planetVAO[mi]
+          if(meM) planetVAOUpdate(meM, ax, ay, az, rrX, rrY, rrZ)
+          else planetVAO[mi] = buildPlanetVAO(ax, ay, az, rrX, rrY, rrZ)
         }
       }
       if(mi !== moonIdx && lockParent[mi] >= 0 && !PROC_AST.has(bodies[mi].id) && planetAxis[mi]){
@@ -2200,9 +2276,9 @@
           if(!ld || ld[0]*qX + ld[1]*qY + ld[2]*qZ < 0.9999995){
             lockDir[mi] = [qX, qY, qZ]
             const lax = planetAxis[mi][0], lay = planetAxis[mi][1], laz = planetAxis[mi][2]
-            const old = planetVAO[mi]
-            if(old && old.vao){ try{ gl.deleteVertexArray(old.vao) }catch(e){} }
-            planetVAO[mi] = buildPlanetVAO(lax, lay, laz, qX, qY, qZ)
+            const leM = planetVAO[mi]
+            if(leM) planetVAOUpdate(leM, lax, lay, laz, qX, qY, qZ)
+            else planetVAO[mi] = buildPlanetVAO(lax, lay, laz, qX, qY, qZ)
             spinLast[mi] = orbitalTime
           }
         }
@@ -2224,9 +2300,11 @@
           const rrX = r0[0]*cA + cx*sA + pax*dot*(1-cA)
           const rrY = r0[1]*cA + cy*sA + pay*dot*(1-cA)
           const rrZ = r0[2]*cA + cz*sA + paz*dot*(1-cA)
-          const old = planetVAO[mi]
-          if(old && old.vao){ try{ gl.deleteVertexArray(old.vao) }catch(e){} }
-          if(PROC_AST.has(bodies[mi].id)) planetVAO[mi] = buildProceduralVAO(pax, pay, paz, rrX, rrY, rrZ, hashStr(bodies[mi].id))
+          const seM = planetVAO[mi]
+          if(seM){
+            if(seM.kind === 1) procVAOUpdate(seM, pax, pay, paz, rrX, rrY, rrZ)
+            else planetVAOUpdate(seM, pax, pay, paz, rrX, rrY, rrZ)
+          } else if(PROC_AST.has(bodies[mi].id)) planetVAO[mi] = buildProceduralVAO(pax, pay, paz, rrX, rrY, rrZ, hashStr(bodies[mi].id))
           else planetVAO[mi] = buildPlanetVAO(pax, pay, paz, rrX, rrY, rrZ)
           spinLast[mi] = ang
         }
@@ -2245,7 +2323,7 @@
       if(!pv) continue
       let sh = 0
       if(typeof window.PATMO !== 'undefined' && PATMO.mesh){
-        const mc0 = getColor(bodies[mi])
+        const mc0 = bodyColor(mi)
         const mt0 = meshTex[mi]
         sh = PATMO.mesh(mi, {mpx: mpx, mpy: mpy, mpz: mpz, mrr: mrr, cr: mc0[0], cg: mc0[1], cb: mc0[2], texOk: !!(mt0 && mt0.ok), tex: mt0 ? mt0.t : null, vao: pv.vao, count: pv.count, frame: pv.frame, viewM: viewL, projM: proj, sunW: [-lineOrigin[0], -lineOrigin[1], -lineOrigin[2]], camW: [aex, aey, aez], expo: window.ATMO_EXPOSURE, wire: wireS});
       }
@@ -2257,8 +2335,8 @@
         continue
       }
       if(bodies[mi].id !== 'sun' && typeof window.PATMO !== 'undefined' && PATMO.rock){
-        const mcR = getColor(bodies[mi])
-        const mcRw = PROC_AST.has(bodies[mi].id) ? rockyTint(bodies[mi].id) : [1.0, 1.0, 1.0]
+        const mcR = bodyColor(mi)
+        const mcRw = PROC_AST.has(bodies[mi].id) ? rockyTint(bodies[mi].id) : WHITE3
         const mtR = meshTex[mi]
         if(PATMO.rock({mpx: mpx, mpy: mpy, mpz: mpz, mrr: mrr, cr: mcRw[0], cg: mcRw[1], cb: mcRw[2], texOk: !!(mtR && mtR.ok), tex: mtR ? mtR.t : null, vao: pv.vao, count: pv.count, viewM: viewL, projM: proj, sunW: [-lineOrigin[0], -lineOrigin[1], -lineOrigin[2]], camW: [aex, aey, aez], expo: window.ATMO_EXPOSURE, wire: wireS}, bodyRadiusKm(bodies[mi]))){
           gl.useProgram(progS)
@@ -2271,7 +2349,7 @@
       gl.bindVertexArray(pv.vao)
       gl.uniform3f(locCenterS, mpx, mpy, mpz)
       gl.uniform1f(locRadiusS, mrr)
-      const mc = getColor(bodies[mi])
+      const mc = bodyColor(mi)
       gl.uniform3f(locColorS, mc[0], mc[1], mc[2])
       gl.uniform1f(locEmitS, bodies[mi].id==='sun' ? 1 : 0)
       const mtr = meshTex[mi]
@@ -2289,10 +2367,11 @@
     gl.bindVertexArray(null)
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-    drawImpostors(aex, aey, aez)
+    drawImpostors(aex, aey, aez, false)
     if(typeof window.PATMO !== 'undefined' && PATMO.shells){
       PATMO.shells({viewM: viewL, projM: proj, sunW: [-lineOrigin[0], -lineOrigin[1], -lineOrigin[2]], camW: [aex, aey, aez], expo: window.ATMO_EXPOSURE});
     }
+    drawImpostors(aex, aey, aez, true)
     if(ringProgOk && ringTex.ok && saturnIdx >= 0){
       gl.enable(gl.BLEND)
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
