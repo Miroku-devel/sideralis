@@ -302,14 +302,10 @@ body.orientation-locked #labels {
     padding: 6px 10px;
     font-size: 15px;
   }
-  #ipanel-head {
-    padding-top: calc(6px + env(safe-area-inset-top));
-  }
   #ipanel-body {
     grid-template-columns: 1fr;
     font-size: 12px;
     padding: 8px 12px 12px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
   #ipanel-body .prow {
     gap: 6px 10px;
@@ -398,7 +394,7 @@ body.orientation-locked #labels {
 }
 #spanel-body {
   overflow-y: auto;
-  padding: 10px 16px 14px;
+  padding: 14px 16px 6px;
   font-size: 13px;
   display: flex;
   flex-direction: column;
@@ -425,13 +421,15 @@ body.orientation-locked #labels {
     padding: 6px 10px;
     font-size: 15px;
   }
-  #spanel-head {
-    padding-top: calc(6px + env(safe-area-inset-top));
-  }
   #spanel-body {
     font-size: 12px;
-    padding: 8px 12px 12px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-top: 0;
+  }
+  #search-input {
+    margin-top: 14px;
+  }
+  #spanel-body:has(.search-result-item) {
+    padding-bottom: 12px;
   }
 }
 #search-input {
@@ -463,6 +461,9 @@ body.orientation-locked #labels {
   border-radius: 6px;
   cursor: pointer;
   background: rgba(0, 0, 0, .25);
+}
+#spanel-body:has(.search-result-item) {
+  padding-bottom: 14px;
 }
 @media (hover: hover) {
   .search-result-item:hover {
