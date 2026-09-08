@@ -28,11 +28,19 @@
   }
   function loadSrc (src) {
     return new Promise((res, rej) => {
-      const s = document.createElement('script')
-      s.src = src
-      s.onload = res
-      s.onerror = () => rej(new Error('load ' + src))
-      document.body.appendChild(s)
+      let attempts = 0
+      function tryLoad () {
+        const s = document.createElement('script')
+        s.src = src
+        s.onload = res
+        s.onerror = () => {
+          s.remove()
+          if (attempts < 1) { attempts++; tryLoad() }
+          else rej(new Error('load ' + src))
+        }
+        document.body.appendChild(s)
+      }
+      tryLoad()
     })
   }
   function loadJSList (list, f0, f1) {
@@ -57,26 +65,34 @@
       if (T > 0) set(f0 + (f1 - f0) * L / T)
     }
     return Promise.all(items.map(it => new Promise((res, rej) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('GET', it.src, true)
-      xhr.responseType = 'text'
-      xhr.onprogress = e => {
-        it.loaded = e.loaded
-        if (e.lengthComputable) it.total = e.total
-        upd()
-      }
-      xhr.onload = () => {
-        if (xhr.status === 200 || xhr.status === 0) {
-          it.loaded = xhr.responseText.length
-          it.done = true
-          if (!it.total) it.total = it.loaded
-          it.text = xhr.responseText
+      let retries = 1
+      function attempt () {
+        const xhr = new XMLHttpRequest()
+        xhr.open('GET', it.src, true)
+        xhr.responseType = 'text'
+        xhr.onprogress = e => {
+          it.loaded = e.loaded
+          if (e.lengthComputable) it.total = e.total
           upd()
-          res()
-        } else rej(new Error('load ' + it.src))
+        }
+        xhr.onload = () => {
+          if (xhr.status === 200 || xhr.status === 0) {
+            it.loaded = xhr.responseText.length
+            it.done = true
+            if (!it.total) it.total = it.loaded
+            it.text = xhr.responseText
+            upd()
+            res()
+          } else if (retries > 0) { retries--; attempt() }
+          else rej(new Error('load ' + it.src))
+        }
+        xhr.onerror = () => {
+          if (retries > 0) { retries--; attempt() }
+          else rej(new Error('load ' + it.src))
+        }
+        xhr.send()
       }
-      xhr.onerror = () => rej(new Error('load ' + it.src))
-      xhr.send()
+      attempt()
     }))).then(() => {
       for (let i = 0; i < items.length; i++) execJS(items[i].text)
     })
@@ -95,6 +111,9 @@
     return out.subarray(0, o)
   }
   async function decompressBr (comp) {
+    if (typeof BrotliDecode === 'function') {
+      return BrotliDecode(new Int8Array(comp.buffer, comp.byteOffset, comp.length))
+    }
     try {
       return new Uint8Array(await new Response(
         new Blob([comp]).stream().pipeThrough(new DecompressionStream('br'))
