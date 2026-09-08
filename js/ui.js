@@ -23,6 +23,13 @@ if(orbitBtn && typeof ICONS !== 'undefined' && typeof ICONS.orbit === 'string'){
   })
 }
 window.ANIM_RUNNING = true
+const githubBtn = document.getElementById('github')
+if(githubBtn && typeof ICONS !== 'undefined' && typeof ICONS.github === 'string'){
+  githubBtn.innerHTML = ICONS.github
+  githubBtn.addEventListener('click', () => {
+    window.open('https://github.com/Miroku-devel/sideralis', '_blank', 'noopener')
+  })
+}
 const ipanelCloseBtn = document.getElementById('ipanel-close')
 if(ipanelCloseBtn && typeof ICONS !== 'undefined' && typeof ICONS.chevronup === 'string'){
   ipanelCloseBtn.innerHTML = ICONS.chevronup
