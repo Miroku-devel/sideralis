@@ -52,6 +52,16 @@
     gl.linkProgram(progStar)
     starProgOk = !!gl.getProgramParameter(progStar, gl.LINK_STATUS)
   }
+  const vsHg = compile(gl.VERTEX_SHADER, vsStars)
+  const fsHg = compile(gl.FRAGMENT_SHADER, fsStars)
+  const progHg = gl.createProgram()
+  let hgProgOk = false
+  if(vsHg && fsHg){
+    gl.attachShader(progHg, vsHg)
+    gl.attachShader(progHg, fsHg)
+    gl.linkProgram(progHg)
+    hgProgOk = !!gl.getProgramParameter(progHg, gl.LINK_STATUS)
+  }
   const vsFx = compile(gl.VERTEX_SHADER, vsFXAA)
   const fsFx = compile(gl.FRAGMENT_SHADER, fsFXAA)
   const progFx = gl.createProgram()
@@ -102,6 +112,22 @@
   const locStarMultStar = gl.getUniformLocation(progStar, 'u_starMult')
   const locResStar = gl.getUniformLocation(progStar, 'u_resolution')
   const locMinPxStar = gl.getUniformLocation(progStar, 'u_starMinPx')
+  const locFocusStar = gl.getUniformLocation(progStar, 'u_focus')
+  const locFocus = gl.getUniformLocation(prog, 'u_focus')
+  const locPosHg = gl.getAttribLocation(progHg, 'a_pos')
+  const locQuadHg = gl.getAttribLocation(progHg, 'a_quad')
+  const locRadiusHg = gl.getAttribLocation(progHg, 'a_radius')
+  const locColorHg = gl.getAttribLocation(progHg, 'a_color')
+  const locMixHg = gl.getAttribLocation(progHg, 'a_mix')
+  const locPhaseHg = gl.getAttribLocation(progHg, 'a_phase')
+  const locViewHg = gl.getUniformLocation(progHg, 'u_view')
+  const locProjHg = gl.getUniformLocation(progHg, 'u_proj')
+  const locResHg = gl.getUniformLocation(progHg, 'u_resolution')
+  const locScaleHg = gl.getUniformLocation(progHg, 'u_scale')
+  const locMinPxHg = gl.getUniformLocation(progHg, 'u_minPx')
+  const locTimeHg = gl.getUniformLocation(progHg, 'u_time')
+  const locSpeedHg = gl.getUniformLocation(progHg, 'u_speed')
+  const locFocusHg = gl.getUniformLocation(progHg, 'u_focus')
   const locPosP = gl.getAttribLocation(progP, 'a_pos')
   const locColorP = gl.getAttribLocation(progP, 'a_color')
   const locRadiusP = gl.getAttribLocation(progP, 'a_radius')
@@ -111,6 +137,7 @@
   const locTimeP = gl.getUniformLocation(progP, 'u_time')
   const locSpeedP = gl.getUniformLocation(progP, 'u_starSpeed')
   const locStarMultP = gl.getUniformLocation(progP, 'u_starMult')
+  const locFocusP = gl.getUniformLocation(progP, 'u_focus')
   const locPosL = gl.getAttribLocation(progL, 'a_pos')
   const locViewL = gl.getUniformLocation(progL, 'u_view')
   const locProjL = gl.getUniformLocation(progL, 'u_proj')
@@ -339,6 +366,294 @@
   gl.enableVertexAttribArray(locQuadImp)
   gl.vertexAttribPointer(locQuadImp, 2, gl.FLOAT, false, 0, 0)
   gl.bindVertexArray(null)
+  const OBLIQUITY = 23.4392911 * Math.PI / 180
+  const STAR_R = 30
+  const PC_KM = AU_KM * 648000 / Math.PI
+  function hgWorldDist(dpc){
+    const d = (typeof dpc === 'number' && isFinite(dpc) && dpc > 0) ? dpc : 1.3
+    return d * PC_KM * worldScale
+  }
+  const hgSrc = (typeof DATA.stars === 'object' && DATA.stars && Array.isArray(DATA.stars.row)) ? DATA.stars : null
+  const hgRow = hgSrc ? hgSrc.row : []
+  const hgN = Math.floor(hgRow.length / 22)
+  const hgProper = (hgSrc && hgSrc.proper) ? hgSrc.proper : {}
+  const hgPosRaw = new Float64Array(hgN * 3)
+  const hgPos = new Float32Array(hgN * 3)
+  const hgRad = new Float32Array(hgN)
+  const hgCol = new Float32Array(hgN * 3)
+  const hgMix = new Float32Array(hgN)
+  const hgPhase = new Float32Array(hgN)
+  const hgId = new Int32Array(hgN)
+  const hgHip = new Int32Array(hgN)
+  const hgHd = new Int32Array(hgN)
+  const hgHr = new Int32Array(hgN)
+  const hgMag = new Float64Array(hgN)
+  const hgCi = new Float64Array(hgN)
+  const hgDist = new Float64Array(hgN)
+  const hgRa = new Float64Array(hgN)
+  const hgDec = new Float64Array(hgN)
+  const hgAbs = new Float64Array(hgN)
+  const hgLum = new Float64Array(hgN)
+  const hgRv = new Float64Array(hgN)
+  const hgPmra = new Float64Array(hgN)
+  const hgPmdec = new Float64Array(hgN)
+  const hgVarMin = new Float64Array(hgN)
+  const hgVarMax = new Float64Array(hgN)
+  const hgGl = new Array(hgN).fill(null)
+  const hgBayer = new Array(hgN).fill(null)
+  const hgFlam = new Array(hgN).fill(null)
+  const hgCon = new Array(hgN).fill(null)
+  const hgSpect = new Array(hgN).fill(null)
+  const hgVar = new Array(hgN).fill(null)
+  const hgLabel = new Array(hgN).fill(null)
+  function hgAutoName(k){
+    if(hgHip[k] > 0) return 'HIP ' + hgHip[k]
+    const agl = hgGl[k]
+    if(typeof agl === 'string' && agl !== '') return agl
+    if(hgHd[k] > 0) return 'HD ' + hgHd[k]
+    if(hgHr[k] > 0) return 'HR ' + hgHr[k]
+    const aby = hgBayer[k]
+    if(typeof aby === 'string' && aby !== ''){
+      const acn = hgCon[k]
+      return (typeof acn === 'string' && acn !== '') ? aby + ' ' + acn : aby
+    }
+    const afl = hgFlam[k]
+    if(typeof afl === 'string' && afl !== ''){
+      const acn = hgCon[k]
+      return (typeof acn === 'string' && acn !== '') ? afl + ' ' + acn : afl
+    }
+    return 'Star ' + fmtRA(hgRa[k]) + ' ' + fmtDec(hgDec[k])
+  }
+  const hgLabelIdx = []
+  const HG_LABEL_MAX = 700
+  const HG_LABEL_MAG = 4.2
+  const HG_DRAW_MAG = Infinity
+  const HG_PICK_MAG = (typeof window.STAR_PICK_MAG === 'number' && window.STAR_PICK_MAG > 0) ? window.STAR_PICK_MAG : Infinity
+  const HG_BASE = 0.05
+  const HG_MIN = 0.0005
+  const CON_NAMES = {And:'Andromeda',Ant:'Antlia',Aps:'Apus',Aql:'Aquila',Aqr:'Aquarius',Ara:'Ara',Ari:'Aries',Aur:'Auriga',Boo:'Bootes',Cae:'Caelum',Cam:'Camelopardalis',Cap:'Capricornus',Car:'Carina',Cas:'Cassiopeia',Cen:'Centaurus',Cep:'Cepheus',Cet:'Cetus',Cha:'Chamaeleon',Cir:'Circinus',CMa:'Canis Major',CMi:'Canis Minor',Cnc:'Cancer',Col:'Columba',Com:'Coma Berenices',CrA:'Corona Australis',CrB:'Corona Borealis',Crt:'Crater',Cru:'Crux',Crv:'Corvus',CVn:'Canes Venatici',Cyg:'Cygnus',Del:'Delphinus',Dor:'Dorado',Dra:'Draco',Equ:'Equuleus',Eri:'Eridanus',For:'Fornax',Gem:'Gemini',Gru:'Grus',Her:'Hercules',Hor:'Horologium',Hya:'Hydra',Hyi:'Hydrus',Ind:'Indus',Lac:'Lacerta',Leo:'Leo',Lep:'Lepus',Lib:'Libra',LMi:'Leo Minor',Lup:'Lupus',Lyn:'Lynx',Lyr:'Lyra',Men:'Mensa',Mic:'Microscopium',Mon:'Monoceros',Mus:'Musca',Nor:'Norma',Oct:'Octans',Oph:'Ophiuchus',Ori:'Orion',Pav:'Pavo',Peg:'Pegasus',Per:'Perseus',Phe:'Phoenix',Pic:'Pictor',PsA:'Piscis Austrinus',Psc:'Pisces',Pup:'Puppis',Pyx:'Pyxis',Ret:'Reticulum',Scl:'Sculptor',Sco:'Scorpius',Sct:'Scutum',Ser:'Serpens',Sex:'Sextans',Sge:'Sagitta',Sgr:'Sagittarius',Tau:'Taurus',Tel:'Telescopium',TrA:'Triangulum Australe',Tri:'Triangulum',Tuc:'Tucana',UMa:'Ursa Major',UMi:'Ursa Minor',Vel:'Vela',Vir:'Virgo',Vol:'Volans',Vul:'Vulpecula'}
+  function conName(ab){ return CON_NAMES[ab] || ab }
+  const cosOb = Math.cos(OBLIQUITY)
+  const sinOb = Math.sin(OBLIQUITY)
+  function hgTempRGB(t){
+    t = (t < 2750 ? 2750 : (t > 30000 ? 30000 : t)) / 100
+    let r, g, b
+    if(t <= 66) r = 255
+    else r = 329.69 * Math.pow(t - 60, -0.1332)
+    if(t <= 66) g = 99.47 * Math.log(t) - 161.12
+    else g = 288.12 * Math.pow(t - 60, -0.0755)
+    if(t <= 19) b = 0
+    else if(t < 66) b = 138.52 * Math.log(t - 10) + 305.04
+    else b = 255
+    r = r < 0 ? 0 : (r > 255 ? 255 : r) / 255
+    g = g < 0 ? 0 : (g > 255 ? 255 : g) / 255
+    b = b < 0 ? 0 : (b > 255 ? 255 : b) / 255
+    let m = r > g ? r : g
+    if(b > m) m = b
+    if(m > 1e-6){ r /= m; g /= m; b /= m }
+    return [r, g, b]
+  }
+  function hgColorOf(ci){
+    if(ci === null || ci === undefined || !isFinite(ci)) return [1.0, 1.0, 1.0]
+    const t = 4600 * (1 / (0.92 * ci + 1.7) + 1 / (0.92 * ci + 0.62))
+    return hgTempRGB(t)
+  }
+  let hgDraw = hgN
+  for(let k = 0; k < hgN; k++){
+    const b = k * 22
+    const id = hgRow[b]
+    const hip = hgRow[b+1]
+    const ra = hgRow[b+2]
+    const dec = hgRow[b+3]
+    const mag = hgRow[b+4]
+    const ci = hgRow[b+5]
+    const dist = hgRow[b+6]
+    const hd = hgRow[b+7]
+    const hr = hgRow[b+8]
+    const gls = hgRow[b+9]
+    const bay = hgRow[b+10]
+    const fla = hgRow[b+11]
+    const con = hgRow[b+12]
+    const spe = hgRow[b+13]
+    const abm = hgRow[b+14]
+    const lum = hgRow[b+15]
+    const rv = hgRow[b+16]
+    const pmr = hgRow[b+17]
+    const pmd = hgRow[b+18]
+    const vst = hgRow[b+19]
+    const vmi = hgRow[b+20]
+    const vma = hgRow[b+21]
+    hgRa[k] = ra
+    hgDec[k] = dec
+    hgMag[k] = mag
+    hgCi[k] = (ci === null || ci === undefined) ? -99 : ci
+    hgDist[k] = (dist === null || dist === undefined) ? 0 : dist
+    hgId[k] = id
+    hgHip[k] = hip
+    hgHd[k] = (typeof hd === 'number' && isFinite(hd)) ? (hd | 0) : 0
+    hgHr[k] = (typeof hr === 'number' && isFinite(hr)) ? (hr | 0) : 0
+    hgGl[k] = (typeof gls === 'string' && gls !== '') ? gls : null
+    hgBayer[k] = (typeof bay === 'string' && bay !== '') ? bay : null
+    hgFlam[k] = (typeof fla === 'string' && fla !== '') ? fla : null
+    hgCon[k] = (typeof con === 'string' && con !== '') ? con : null
+    hgSpect[k] = (typeof spe === 'string' && spe !== '') ? spe : null
+    hgVar[k] = (typeof vst === 'string' && vst !== '') ? vst : null
+    hgAbs[k] = (typeof abm === 'number' && isFinite(abm)) ? abm : NaN
+    hgLum[k] = (typeof lum === 'number' && isFinite(lum)) ? lum : NaN
+    hgRv[k] = (typeof rv === 'number' && isFinite(rv)) ? rv : NaN
+    hgPmra[k] = (typeof pmr === 'number' && isFinite(pmr)) ? pmr : NaN
+    hgPmdec[k] = (typeof pmd === 'number' && isFinite(pmd)) ? pmd : NaN
+    hgVarMin[k] = (typeof vmi === 'number' && isFinite(vmi)) ? vmi : NaN
+    hgVarMax[k] = (typeof vma === 'number' && isFinite(vma)) ? vma : NaN
+    const cd = Math.cos(dec)
+    const exq = cd * Math.cos(ra)
+    const eyq = cd * Math.sin(ra)
+    const ezq = Math.sin(dec)
+    const hgw = hgWorldDist(dist)
+    const hgsc = hgw / STAR_R
+    hgPosRaw[k*3]   = exq * hgw
+    hgPosRaw[k*3+1] = (eyq * cosOb + ezq * sinOb) * hgw
+    hgPosRaw[k*3+2] = (-eyq * sinOb + ezq * cosOb) * hgw
+    hgRad[k] = hgsc * Math.max(HG_MIN, HG_BASE * Math.pow(10, -0.2 * mag))
+    const c = hgColorOf(ci)
+    hgCol[k*3] = c[0]
+    hgCol[k*3+1] = c[1]
+    hgCol[k*3+2] = c[2]
+    hgMix[k] = 1
+    hgPhase[k] = (k % 40) * 0.5236 + (id % 7) * 0.2
+    const pnL = hgProper[id]
+    if(pnL || (hgLabelIdx.length < HG_LABEL_MAX && (hip > 0 || mag <= HG_LABEL_MAG))){
+      hgLabel[k] = pnL || hgAutoName(k)
+      hgLabelIdx.push(k)
+    }
+    if(mag > HG_DRAW_MAG && hgDraw === hgN) hgDraw = k
+  }
+  const hgVao = gl.createVertexArray()
+  gl.bindVertexArray(hgVao)
+  const hqbuf = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hqbuf)
+  gl.bufferData(gl.ARRAY_BUFFER, quadVerts, gl.STATIC_DRAW)
+  gl.enableVertexAttribArray(locQuadHg)
+  gl.vertexAttribPointer(locQuadHg, 2, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locQuadHg, 0)
+  const hpv = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hpv)
+  gl.bufferData(gl.ARRAY_BUFFER, hgPos, gl.DYNAMIC_DRAW)
+  gl.enableVertexAttribArray(locPosHg)
+  gl.vertexAttribPointer(locPosHg, 3, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locPosHg, 1)
+  const hrv = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hrv)
+  gl.bufferData(gl.ARRAY_BUFFER, hgRad, gl.STATIC_DRAW)
+  gl.enableVertexAttribArray(locRadiusHg)
+  gl.vertexAttribPointer(locRadiusHg, 1, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locRadiusHg, 1)
+  const hcv = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hcv)
+  gl.bufferData(gl.ARRAY_BUFFER, hgCol, gl.STATIC_DRAW)
+  gl.enableVertexAttribArray(locColorHg)
+  gl.vertexAttribPointer(locColorHg, 3, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locColorHg, 1)
+  const hmv = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hmv)
+  gl.bufferData(gl.ARRAY_BUFFER, hgMix, gl.STATIC_DRAW)
+  gl.enableVertexAttribArray(locMixHg)
+  gl.vertexAttribPointer(locMixHg, 1, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locMixHg, 1)
+  const hphv = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, hphv)
+  gl.bufferData(gl.ARRAY_BUFFER, hgPhase, gl.STATIC_DRAW)
+  gl.enableVertexAttribArray(locPhaseHg)
+  gl.vertexAttribPointer(locPhaseHg, 1, gl.FLOAT, false, 0, 0)
+  gl.vertexAttribDivisor(locPhaseHg, 1)
+  gl.bindVertexArray(null)
+  const dssStars = []
+  const dssSeen = {}
+  function dssDes(s){
+    const dd = []
+    if(hgGl[s]) dd.push(hgGl[s])
+    if(hgHip[s] > 0) dd.push('HIP ' + hgHip[s])
+    if(hgHd[s] > 0) dd.push('HD ' + hgHd[s])
+    if(hgHr[s] > 0) dd.push('HR ' + hgHr[s])
+    return dd
+  }
+  function dssBay(s){
+    const bb = hgBayer[s]
+    const ff = hgFlam[s]
+    const hasB = (typeof bb === 'string' && bb !== '')
+    const hasF = (typeof ff === 'string' && ff !== '')
+    if(!hasB && !hasF) return null
+    const cc = hgCon[s]
+    return {f: hasF ? ff : null, b: hasB ? bb : null, c: (typeof cc === 'string' && cc !== '') ? cc : null}
+  }
+  function dssAdd(s){
+    if(dssSeen[s]) return
+    dssSeen[s] = 1
+    const nm = hgLabel[s] || starName(s)
+    dssStars.push({i: N + s, name: nm, des: dssDes(s), bay: dssBay(s), key: (nm + ' ' + (hgGl[s] || '') + ' ' + (hgBayer[s] || '') + ' ' + (hgFlam[s] || '') + ' ' + (hgHr[s] > 0 ? 'HR ' + hgHr[s] : '') + ' ' + (hgCon[s] || '') + ' ' + conName(hgCon[s] || '')).toLowerCase()})
+  }
+  for(let k = 0; k < hgLabelIdx.length; k++) dssAdd(hgLabelIdx[k])
+  for(let k = 0; k < hgN; k++){ if(hgGl[k] || hgBayer[k] || hgFlam[k] || hgHr[k]) dssAdd(k) }
+  window.DSS_STARS = dssStars
+  window.DSS_HSTAR_N = hgN
+  const hgByHip = {}
+  for(let k = 0; k < hgN; k++){ if(hgHip[k] > 0 && hgByHip[hgHip[k]] === undefined) hgByHip[hgHip[k]] = k }
+  window.DSS_BY_HIP = function(hip){
+    const k = hgByHip[hip]
+    if(k === undefined) return null
+    return {i: N + k, name: starName(k), des: dssDes(k), bay: dssBay(k)}
+  }
+  const hgByHd = {}
+  for(let k = 0; k < hgN; k++){ if(hgHd[k] > 0 && hgByHd[hgHd[k]] === undefined) hgByHd[hgHd[k]] = k }
+  window.DSS_BY_HD = function(hd){
+    const k = hgByHd[hd]
+    if(k === undefined) return null
+    return {i: N + k, name: starName(k), des: dssDes(k), bay: dssBay(k)}
+  }
+  const hgByHr = {}
+  for(let k = 0; k < hgN; k++){ if(hgHr[k] > 0 && hgByHr[hgHr[k]] === undefined) hgByHr[hgHr[k]] = k }
+  window.DSS_BY_HR = function(hr){
+    const k = hgByHr[hr]
+    if(k === undefined) return null
+    return {i: N + k, name: starName(k), des: dssDes(k), bay: dssBay(k)}
+  }
+  const hgByFlamCon = {}
+  for(let k = 0; k < hgN; k++){
+    const fl = hgFlam[k], cc = hgCon[k]
+    if(typeof fl === 'string' && fl !== '' && typeof cc === 'string' && cc !== ''){
+      const key = (fl + ' ' + cc).toLowerCase()
+      if(hgByFlamCon[key] === undefined) hgByFlamCon[key] = k
+      const key2 = (fl + cc).toLowerCase()
+      if(hgByFlamCon[key2] === undefined) hgByFlamCon[key2] = k
+    }
+  }
+  window.DSS_BY_FLAM = function(flam, con){
+    const key = (String(flam) + ' ' + String(con)).toLowerCase()
+    let k = hgByFlamCon[key]
+    if(k === undefined) k = hgByFlamCon[(String(flam)+String(con)).toLowerCase()]
+    if(k === undefined) return null
+    return {i: N + k, name: starName(k), des: dssDes(k), bay: dssBay(k)}
+  }
+  const hgByBayerFlamCon = {}
+  for(let k = 0; k < hgN; k++){
+    const fl = hgFlam[k], bb = hgBayer[k], cc = hgCon[k]
+    if(typeof cc === 'string' && cc !== '' && ((typeof bb === 'string' && bb !== '') || (typeof fl === 'string' && fl !== ''))){
+      const bnorm = bb ? bb.replace(/-/g,'') : ''
+      const key1 = ((fl||'') + bnorm + cc).toLowerCase()
+      const key2 = ((fl||'') + bnorm + ' ' + cc).toLowerCase()
+      const key3 = (bnorm + cc).toLowerCase()
+      const key4 = (bnorm + ' ' + cc).toLowerCase()
+      if(hgByBayerFlamCon[key1]===undefined) hgByBayerFlamCon[key1]=k
+      if(hgByBayerFlamCon[key2]===undefined) hgByBayerFlamCon[key2]=k
+      if(hgByBayerFlamCon[key3]===undefined) hgByBayerFlamCon[key3]=k
+      if(hgByBayerFlamCon[key4]===undefined) hgByBayerFlamCon[key4]=k
+    }
+  }
+  window.DSS_BY_BAYER = function(q){
+    const k = hgByBayerFlamCon[String(q).toLowerCase().replace(/[^a-z0-9]/g,'')]
+    if(k===undefined) return null
+    return {i: N + k, name: starName(k), des: dssDes(k), bay: dssBay(k)}
+  }
   const impTexSize = 256
   const impColorTex = gl.createTexture()
   gl.bindTexture(gl.TEXTURE_2D, impColorTex)
@@ -649,6 +964,11 @@
       posData[pi+1]=posRaw[pi+1]-lineOrigin[1]
       posData[pi+2]=posRaw[pi+2]-lineOrigin[2]
     }
+    for(let si=0;si<hgPosRaw.length;si+=3){
+      hgPos[si]=hgPosRaw[si]-lineOrigin[0]
+      hgPos[si+1]=hgPosRaw[si+1]-lineOrigin[1]
+      hgPos[si+2]=hgPosRaw[si+2]-lineOrigin[2]
+    }
     updateOrbitLines()
     for(let ai=0;ai<axisRaw.length;ai+=3){
       axisData[ai]=axisRaw[ai]-lineOrigin[0]
@@ -659,6 +979,10 @@
     gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
     gl.bindBuffer(gl.ARRAY_BUFFER, pbufP)
     gl.bufferData(gl.ARRAY_BUFFER, posData, gl.DYNAMIC_DRAW)
+    if(hgN > 0){
+      gl.bindBuffer(gl.ARRAY_BUFFER, hpv)
+      gl.bufferData(gl.ARRAY_BUFFER, hgPos, gl.DYNAMIC_DRAW)
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, abuf)
     gl.bufferData(gl.ARRAY_BUFFER, axisData, gl.DYNAMIC_DRAW)
     gl.bindVertexArray(null)
@@ -1136,44 +1460,94 @@
                      ['ny', gl.TEXTURE_CUBE_MAP_NEGATIVE_Y],
                      ['pz', gl.TEXTURE_CUBE_MAP_POSITIVE_Z],
                      ['nz', gl.TEXTURE_CUBE_MAP_NEGATIVE_Z]]
+  window.__SIDERALIS_READY = false
+  window.__SIDERALIS_PROGRESS = 0
+  const __readyState = { texTotal: 0, texDone: 0, procTotal: 0, procDone: 0, warmupNeed: 3, warmupDone: 0, fontsDone: false }
+  function __updateBootProgress(){
+    try{
+      const total = __readyState.texTotal + __readyState.procTotal + 1
+      let done = __readyState.texDone + __readyState.procDone
+      done += Math.min(__readyState.warmupDone, __readyState.warmupNeed) / Math.max(__readyState.warmupNeed, 1) * 0.5
+      if(__readyState.fontsDone) done += 0.5
+      const p = total > 0 ? done / total : 0
+      window.__SIDERALIS_PROGRESS = Math.max(0, Math.min(1, p))
+    }catch(eP){}
+  }
+  __updateBootProgress()
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(() => { __readyState.fontsDone = true; __updateBootProgress() }).catch(() => { __readyState.fontsDone = true; __updateBootProgress() })
+  } else {
+    __readyState.fontsDone = true
+    __updateBootProgress()
+  }
   function loadMeshTexCubemap(mi, facesCur){
     const rec = {t: null, ok: false}
     meshTex[mi] = rec
+    __readyState.texTotal++
+    __updateBootProgress()
     const pend = CUBE_FACES.length
     const imgs = new Array(pend)
-    let loaded = 0
-    for(let fk=0;fk<pend;fk++){
-      const key = CUBE_FACES[fk][0]
-      const img = new Image()
-      imgs[fk] = img
-      img.onload = function(){
-        loaded++
-        if(loaded === pend){
-          const t = gl.createTexture()
-          gl.bindTexture(gl.TEXTURE_CUBE_MAP, t)
-          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
-          for(let qk=0;qk<pend;qk++){
-            gl.texImage2D(CUBE_FACES[qk][1], 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgs[qk])
+    let settled = 0
+    let failed = false
+    return new Promise((resolve) => {
+      let done = false
+      const finish = () => {
+        if(done) return
+        done = true
+        __readyState.texDone++
+        __updateBootProgress()
+        resolve()
+      }
+      for(let fk=0;fk<pend;fk++){
+        const key = CUBE_FACES[fk][0]
+        const img = new Image()
+        imgs[fk] = img
+        img.onload = function(){
+          settled++
+          if(failed) return
+          if(settled === pend){
+            try{
+              const t = gl.createTexture()
+              gl.bindTexture(gl.TEXTURE_CUBE_MAP, t)
+              gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+              for(let qk=0;qk<pend;qk++){
+                gl.texImage2D(CUBE_FACES[qk][1], 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgs[qk])
+              }
+              gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+              gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+              gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+              gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+              gl.generateMipmap(gl.TEXTURE_CUBE_MAP)
+              gl.bindTexture(gl.TEXTURE_CUBE_MAP, null)
+              rec.t = t
+              rec.ok = true
+            }catch(eT){}
+            finish()
           }
-          gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-          gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-          gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-          gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-          gl.generateMipmap(gl.TEXTURE_CUBE_MAP)
-          gl.bindTexture(gl.TEXTURE_CUBE_MAP, null)
-          rec.t = t
-          rec.ok = true
+        }
+        img.onerror = function(){
+          if(done) return
+          failed = true
+          finish()
+        }
+        try{
+          img.src = facesCur[key]
+        }catch(eS){
+          failed = true
+          finish()
+          break
         }
       }
-      img.src = facesCur[key]
-    }
+      if(pend === 0){ finish() }
+    })
   }
+  const __texPromises = []
   if(typeof TEXTURES !== 'undefined'){
     for(let tk=0;tk<meshPlanets.length;tk++){
       const tmi = meshPlanets[tk]
       if(PROC_AST.has(bodies[tmi].id)) continue
       let tkey = TEXTURES[bodies[tmi].id]
-      if(tkey && typeof tkey === 'object') loadMeshTexCubemap(tmi, tkey)
+      if(tkey && typeof tkey === 'object') __texPromises.push(loadMeshTexCubemap(tmi, tkey))
     }
   }
   let saturnIdx = -1
@@ -1246,24 +1620,46 @@
   gl.bindVertexArray(null)
   const ringTex = {t: null, ok: false}
   function loadRingTex(mkey){
-    const img = new Image()
-    img.onload = function(){
-      const t = gl.createTexture()
-      gl.bindTexture(gl.TEXTURE_2D, t)
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-      gl.generateMipmap(gl.TEXTURE_2D)
-      gl.bindTexture(gl.TEXTURE_2D, null)
-      ringTex.t = t
-      ringTex.ok = true
-    }
-    img.src = mkey
+    __readyState.texTotal++
+    __updateBootProgress()
+    return new Promise((resolve) => {
+      let done = false
+      const finish = () => {
+        if(done) return
+        done = true
+        __readyState.texDone++
+        __updateBootProgress()
+        resolve()
+      }
+      const img = new Image()
+      img.onload = function(){
+        try{
+          const t = gl.createTexture()
+          gl.bindTexture(gl.TEXTURE_2D, t)
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+          gl.generateMipmap(gl.TEXTURE_2D)
+          gl.bindTexture(gl.TEXTURE_2D, null)
+          ringTex.t = t
+          ringTex.ok = true
+        }catch(eR){}
+        finish()
+      }
+      img.onerror = function(){
+        finish()
+      }
+      try{
+        img.src = mkey
+      }catch(eS2){
+        finish()
+      }
+    })
   }
-  if(typeof TEXTURES !== 'undefined' && typeof TEXTURES.ring === 'string') loadRingTex(TEXTURES.ring)
+  if(typeof TEXTURES !== 'undefined' && typeof TEXTURES.ring === 'string') __texPromises.push(loadRingTex(TEXTURES.ring))
   const kmPerWorld = worldRadius
   if(typeof window.PATMO !== 'undefined' && PATMO.setup) PATMO.setup(gl, compile, vsS, kmPerWorld, bodies)
   function perspective(out, fov, aspect, near, far){
@@ -1342,14 +1738,21 @@
     }
     gl.viewport(0,0,canvas.width,canvas.height)
     const aspect = canvas.width / canvas.height
-    perspective(proj, fov, aspect, Math.max(distance * 0.01, 1e-9), 50)
+    perspective(proj, fov, aspect, Math.max(distance * 0.01, 1e-9), 4e9)
   }
   resize()
   let hovered = -1
   let sunIdx = -1
   for(let fi=0;fi<N;fi++){ if(bodies[fi].id==='sun'){ sunIdx=fi; break } }
   let focusedIdx = -1
-  function bodyName(i){ const b=bodies[i]; return b.englishName || b.name || b.id }
+  function starName(s){
+    return hgLabel[s] || hgAutoName(s)
+  }
+  function bodyName(i){
+    if(i >= N) return starName(i - N)
+    const b = bodies[i]
+    return b.englishName || b.name || b.id
+  }
   const LABEL_HIDE_KM = 50
   const SAT_CLOSE_FLOOR_KM = 1.2e-6 / worldScale
   const SAT_FAR_KM = 50000000
@@ -1616,20 +2019,132 @@
     }
     return String(v)
   }
+  function fmtRA(rad){
+    let hh = Math.floor(rad * 12 / Math.PI)
+    let mf = (rad * 12 / Math.PI - hh) * 60
+    const m = Math.floor(mf)
+    const s = Math.round((mf - m) * 60)
+    return (hh < 10 ? '0' : '') + hh + 'h ' + (m < 10 ? '0' : '') + m + 'm ' + (s < 10 ? '0' : '') + s + 's'
+  }
+  function fmtDec(rad){
+    let dg = rad * 180 / Math.PI
+    const sign = dg < 0 ? '-' : '+'
+    dg = Math.abs(dg)
+    const d = Math.floor(dg)
+    const mf = (dg - d) * 60
+    const m = Math.floor(mf)
+    const s = Math.round((mf - m) * 60)
+    return sign + (d < 10 ? '0' : '') + d + '° ' + (m < 10 ? '0' : '') + m + "' " + (s < 10 ? '0' : '') + s + '"'
+  }
+  function hgStarRows(s){
+    const out = []
+    const push = (l, v) => { if(v !== '' && v !== null && v !== undefined) out.push('<div class="prow"><span class="pk">' + l + '</span><span class="pv">' + v + '</span></div>') }
+    push('Name', hgProper[hgId[s]] || '')
+    push('HIP', hgHip[s] > 0 ? String(hgHip[s]) : '')
+    push('HD', hgHd[s] > 0 ? String(hgHd[s]) : '')
+    push('HR', hgHr[s] > 0 ? String(hgHr[s]) : '')
+    push('Gliese', hgGl[s] || '')
+    push('Bayer', hgBayer[s] || '')
+    push('Flamsteed', hgFlam[s] || '')
+    push('Constellation', hgCon[s] ? conName(hgCon[s]) : '')
+    push('Spectral type', hgSpect[s] || '')
+    push('Variable star', hgVar[s] || '')
+    push('Variable min (V)', isFinite(hgVarMin[s]) ? fmtVal(hgVarMin[s]) : '')
+    push('Variable max (V)', isFinite(hgVarMax[s]) ? fmtVal(hgVarMax[s]) : '')
+    push('RA (J2000)', (hgRa[s] * 180 / Math.PI).toFixed(3) + '° (' + fmtRA(hgRa[s]) + ')')
+    push('Dec (J2000)', (hgDec[s] * 180 / Math.PI).toFixed(3) + '° (' + fmtDec(hgDec[s]) + ')')
+    push('Proper motion RA (mas/yr)', isFinite(hgPmra[s]) ? fmtVal(hgPmra[s]) : '')
+    push('Proper motion Dec (mas/yr)', isFinite(hgPmdec[s]) ? fmtVal(hgPmdec[s]) : '')
+    push('Radial velocity (km/s)', isFinite(hgRv[s]) ? fmtVal(hgRv[s]) : '')
+    push('Apparent magnitude (V)', fmtVal(hgMag[s]))
+    push('Absolute magnitude (V)', isFinite(hgAbs[s]) ? fmtVal(hgAbs[s]) : '')
+    push('Luminosity (solar)', isFinite(hgLum[s]) ? fmtVal(hgLum[s]) : '')
+    push('B-V color index', hgCi[s] > -90 ? fmtVal(hgCi[s]) : '')
+    push('Distance (pc)', hgDist[s] > 0 ? fmtVal(hgDist[s]) : '')
+    push('Distance (ly)', hgDist[s] > 0 ? fmtVal(hgDist[s] * 3.26156) : '')
+    return out
+  }
   function closeInfoPanel(){
     if(window.SFX && typeof window.SFX.stopAll === 'function') window.SFX.stopAll()
     if(ipanel) ipanel.classList.remove('open')
   }
   window.DSS_INFO_CLOSE = closeInfoPanel
   if(ipanelClose) ipanelClose.addEventListener('click', closeInfoPanel)
+  const ipanelDownload = document.getElementById('ipanel-download')
+  function csvCell(v){
+    const s = String(v)
+    if(s.indexOf('"') >= 0 || s.indexOf(',') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) return '"' + s.split('"').join('""') + '"'
+    return s
+  }
+  function downloadInfoCSV(){
+    if(focusedIdx < 0) return
+    let lines, fname
+    if(focusedIdx >= N){
+      const s = focusedIdx - N
+      fname = 'star-' + starName(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + '.csv'
+      lines = ['name,' + csvCell(starName(s))]
+      const add = (l, v) => { if(v !== '' && v !== null && v !== undefined) lines.push(csvCell(l) + ',' + csvCell(v)) }
+      add('Name', hgProper[hgId[s]] || '')
+      add('HIP', hgHip[s] > 0 ? hgHip[s] : '')
+      add('HD', hgHd[s] > 0 ? hgHd[s] : '')
+      add('HR', hgHr[s] > 0 ? hgHr[s] : '')
+      add('Gliese', hgGl[s] || '')
+      add('Bayer', hgBayer[s] || '')
+      add('Flamsteed', hgFlam[s] || '')
+      add('Constellation', hgCon[s] ? conName(hgCon[s]) : '')
+      add('Spectral type', hgSpect[s] || '')
+      add('Variable star', hgVar[s] || '')
+      add('Variable min (V)', isFinite(hgVarMin[s]) ? hgVarMin[s] : '')
+      add('Variable max (V)', isFinite(hgVarMax[s]) ? hgVarMax[s] : '')
+      add('RA (J2000)', (hgRa[s] * 180 / Math.PI).toFixed(3) + '° (' + fmtRA(hgRa[s]) + ')')
+      add('Dec (J2000)', (hgDec[s] * 180 / Math.PI).toFixed(3) + '° (' + fmtDec(hgDec[s]) + ')')
+      add('Proper motion RA (mas/yr)', isFinite(hgPmra[s]) ? hgPmra[s] : '')
+      add('Proper motion Dec (mas/yr)', isFinite(hgPmdec[s]) ? hgPmdec[s] : '')
+      add('Radial velocity (km/s)', isFinite(hgRv[s]) ? hgRv[s] : '')
+      add('Apparent magnitude (V)', hgMag[s])
+      add('Absolute magnitude (V)', isFinite(hgAbs[s]) ? hgAbs[s] : '')
+      add('Luminosity (solar)', isFinite(hgLum[s]) ? hgLum[s] : '')
+      add('B-V color index', hgCi[s] > -90 ? hgCi[s] : '')
+      add('Distance (pc)', hgDist[s] > 0 ? hgDist[s] : '')
+      add('Distance (ly)', hgDist[s] > 0 ? hgDist[s] * 3.26156 : '')
+    } else {
+      const b = bodies[focusedIdx]
+      fname = (b.id || 'body') + '.csv'
+      lines = ['name,' + csvCell(bodyName(focusedIdx))]
+      for(let fi=0;fi<INFO_FIELDS.length;fi++){
+        const key = INFO_FIELDS[fi][0]
+        const label = INFO_FIELDS[fi][1]
+        const v = b[key]
+        if(v === '' || v === null || v === undefined) continue
+        lines.push(csvCell(label) + ',' + csvCell(fmtVal(v)))
+      }
+    }
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'})
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = fname
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => { try{ URL.revokeObjectURL(a.href) }catch(e){} try{ a.remove() }catch(e2){} }, 800)
+  }
+  if(ipanelDownload) ipanelDownload.addEventListener('click', downloadInfoCSV)
   const ipanelFoot = document.getElementById('ipanel-foot')
   if(ipanelFoot) ipanelFoot.addEventListener('click', closeInfoPanel)
   window.DSS_INFO = function(){
     if(focusedIdx < 0 || !ipanel || !ipanelBody) return
     if(window.SFX && typeof window.SFX.stopAll === 'function') window.SFX.stopAll()
+    const rows = []
+    if(focusedIdx >= N){
+      const s = focusedIdx - N
+      if(ipanelTitle) ipanelTitle.textContent = starName(s)
+      const rowsS = hgStarRows(s)
+      for(let ri=0;ri<rowsS.length;ri++) rows.push(rowsS[ri])
+      ipanelBody.innerHTML = rows.join('')
+      ipanel.classList.add('open')
+      return
+    }
     const b = bodies[focusedIdx]
     if(ipanelTitle) ipanelTitle.textContent = bodyName(focusedIdx)
-    const rows = []
     for(let fi=0;fi<INFO_FIELDS.length;fi++){
       const key = INFO_FIELDS[fi][0]
       const label = INFO_FIELDS[fi][1]
@@ -1660,11 +2175,16 @@
   }
   window.DSS_BODIES = bodies
   window.DSS_ANIMATE = animateTo
+  window.DSS_HOME = animateHome
   let animT = 0
   let animStartTarget = [0,0,0]
   let animEndTarget = [0,0,0]
   let animStartDist = 5.76
   let animEndDist = 5.76
+  let animStartAz = 0.85
+  let animEndAz = 0.85
+  let animStartEl = 0.55
+  let animEndEl = 0.55
   let animActive = false
   let animStartTime = 0
   const coarsePtr = window.matchMedia ? window.matchMedia('(pointer:coarse)').matches : false
@@ -1712,25 +2232,87 @@
         if(d2 < bestD){ bestD = d2; best = i }
       }
     }
+    for(let s=0;s<hgDraw;s++){
+      if(hgMag[s] > HG_PICK_MAG) continue
+      const x = hgPos[s*3], y = hgPos[s*3+1], z = hgPos[s*3+2]
+      const vx = viewL[0]*x + viewL[4]*y + viewL[8]*z + viewL[12]
+      const vy = viewL[1]*x + viewL[5]*y + viewL[9]*z + viewL[13]
+      const vz = viewL[2]*x + viewL[6]*y + viewL[10]*z + viewL[14]
+      const vw = viewL[3]*x + viewL[7]*y + viewL[11]*z + viewL[15]
+      if(vz > -Math.max(distance * 1e-6, 1e-12)) continue
+      const cx = proj[0]*vx + proj[4]*vy + proj[8]*vz + proj[12]*vw
+      const cy = proj[1]*vx + proj[5]*vy + proj[9]*vz + proj[13]*vw
+      const cw = proj[3]*vx + proj[7]*vy + proj[11]*vz + proj[15]*vw
+      if(cw === 0) continue
+      const ndcx = cx / cw
+      const ndcy = cy / cw
+      const sx = (ndcx * 0.5 + 0.5) * w
+      const sy = (1.0 - (ndcy * 0.5 + 0.5)) * h
+      const dx = sx - mx * (w / canvas.clientWidth)
+      const dy = sy - my * (h / canvas.clientHeight)
+      const d2 = dx*dx + dy*dy
+      if(d2 < minRad*minRad && d2 < bestD){
+        bestD = d2
+        best = N + s
+      }
+    }
     return best
   }
   function animateTo(idx){
-    const b = bodies[idx]
-    const tx = posData[idx*3] + lineOrigin[0]
-    const ty = posData[idx*3+1] + lineOrigin[1]
-    const tz = posData[idx*3+2] + lineOrigin[2]
-    const r = radData[idx]
+    let tx, ty, tz, r
+    if(idx >= N){
+      const s = idx - N
+      tx = hgPosRaw[s*3]
+      ty = hgPosRaw[s*3+1]
+      tz = hgPosRaw[s*3+2]
+      r = hgRad[s]
+    } else {
+      tx = posData[idx*3] + lineOrigin[0]
+      ty = posData[idx*3+1] + lineOrigin[1]
+      tz = posData[idx*3+2] + lineOrigin[2]
+      r = radData[idx]
+    }
     let nd = r * 14.4
-    if(nd < 0.000001) nd = 0.000001
-    if(nd > 5.76) nd = 5.76
+    if(idx >= N){
+      const sm = (typeof window.STAR_VISIT === 'number' && window.STAR_VISIT > 0) ? window.STAR_VISIT : 300
+      nd = r * sm
+    } else if(meshPlanets.indexOf(idx) < 0 && r > 0){
+      const sm = (typeof window.STAR_VISIT === 'number' && window.STAR_VISIT > 0) ? window.STAR_VISIT : 300
+      const sx = (typeof window.STAR_SIZE_MULT === 'number' && window.STAR_SIZE_MULT > 0) ? window.STAR_SIZE_MULT : 6
+      nd = r * sx * sm
+    } else if(nd > 5.76) nd = 5.76
+    const animMin = r > 0 ? Math.max(0.0000001, r * 1.05) : 0.0000001
+    if(nd < animMin) nd = animMin
     animStartTarget = [target[0], target[1], target[2]]
     animEndTarget = [tx, ty, tz]
     animStartDist = distance
     animEndDist = nd
+    animStartAz = azimuth
+    animEndAz = azimuth
+    animStartEl = elevation
+    animEndEl = elevation
     animActive = true
     animStartTime = performance.now()
     animT = 0
     focusedIdx = idx
+    refreshLabel()
+  }
+  function animateHome(){
+    animStartTarget = [target[0], target[1], target[2]]
+    animEndTarget = [0, 0, 0]
+    animStartDist = distance
+    animEndDist = 5.76
+    animStartAz = azimuth
+    animEndAz = 0.85
+    const twoPi = Math.PI * 2
+    while(animEndAz - animStartAz > Math.PI) animEndAz -= twoPi
+    while(animEndAz - animStartAz < -Math.PI) animEndAz += twoPi
+    animStartEl = elevation
+    animEndEl = 0.55
+    animActive = true
+    animStartTime = performance.now()
+    animT = 0
+    focusedIdx = -1
     refreshLabel()
   }
   function updateAnim(){
@@ -1743,6 +2325,11 @@
     target[1] = animStartTarget[1] + (animEndTarget[1] - animStartTarget[1]) * ease
     target[2] = animStartTarget[2] + (animEndTarget[2] - animStartTarget[2]) * ease
     distance = animStartDist + (animEndDist - animStartDist) * ease
+    azimuth = animStartAz + (animEndAz - animStartAz) * ease
+    elevation = animStartEl + (animEndEl - animStartEl) * ease
+    const elim = Math.PI * 0.499
+    if(elevation > elim) elevation = elim
+    if(elevation < -elim) elevation = -elim
     updateView()
   }
   let lastFpsT = performance.now()
@@ -1918,10 +2505,10 @@
     gl.bindTexture(gl.TEXTURE_CUBE_MAP, null)
     return t
   }
-  const SUN_TEX_EDGE = 256
-  const SUN_TEX_FW = 256
-  const SUN_TEX_FH = 128
-  function genSunTexture(mi){
+  const SUN_TEX_EDGE = 128
+  const SUN_TEX_FW = 128
+  const SUN_TEX_FH = 64
+  function genSunTextureCPU(mi){
     const seed = hashStr('sun')
     const fw = SUN_TEX_FW, fh = SUN_TEX_FH
     const fieldM = new Float32Array(fw * fh)
@@ -1981,11 +2568,107 @@
     meshTex[mi] = {t: t, ok: true}
     impCache[mi] = null
   }
+  const vsSunBake = '#version 300 es\nout vec2 v_uv;\nvoid main(){\n  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);\n  v_uv = p * 0.5 + 0.5;\n  gl_Position = vec4(p, 0.0, 1.0);\n}'
+  const fsSunBake = '#version 300 es\nprecision highp float;\nprecision highp int;\nin vec2 v_uv;\nuniform mat3 u_basis;\nuniform uint u_seed;\nout vec4 outColor;\nfloat sunHash(ivec3 p, uint seed){\n  uint h = uint(p.x) * 374761393u ^ uint(p.y) * 668265263u ^ uint(p.z) * 1442695041u ^ seed * 974634211u;\n  h = (h ^ (h >> 13u)) * 1274126177u;\n  h ^= (h >> 16u);\n  return float(h) / 4294967296.0;\n}\nfloat sunVNoise(vec3 x, uint seed){\n  vec3 fl = floor(x);\n  ivec3 xi = ivec3(fl);\n  vec3 xf = x - fl;\n  vec3 s = xf * xf * (3.0 - 2.0 * xf);\n  float c000 = sunHash(xi + ivec3(0, 0, 0), seed);\n  float c100 = sunHash(xi + ivec3(1, 0, 0), seed);\n  float c010 = sunHash(xi + ivec3(0, 1, 0), seed);\n  float c110 = sunHash(xi + ivec3(1, 1, 0), seed);\n  float c001 = sunHash(xi + ivec3(0, 0, 1), seed);\n  float c101 = sunHash(xi + ivec3(1, 0, 1), seed);\n  float c011 = sunHash(xi + ivec3(0, 1, 1), seed);\n  float c111 = sunHash(xi + ivec3(1, 1, 1), seed);\n  float x00 = c000 + s.x * (c100 - c000);\n  float x10 = c010 + s.x * (c110 - c010);\n  float x01 = c001 + s.x * (c101 - c001);\n  float x11 = c011 + s.x * (c111 - c011);\n  float y0 = x00 + s.y * (x10 - x00);\n  float y1 = x01 + s.y * (x11 - x01);\n  return y0 + s.z * (y1 - y0);\n}\nfloat sunFbm(vec3 p, uint seed){\n  float a = 0.5;\n  float f = 1.0;\n  float s = 0.0;\n  float n = 0.0;\n  for(int o = 0; o < 4; o++){\n    s += a * sunVNoise(p * f, seed + uint(o) * 101u);\n    n += a;\n    a *= 0.5;\n    f *= 2.03;\n  }\n  return s / n;\n}\nvoid main(){\n  vec3 d = normalize(u_basis * vec3(v_uv * 2.0 - 1.0, 1.0));\n  uint seed = u_seed;\n  vec3 p = d * 3.0;\n  float qx = sunFbm(p, seed);\n  float qy = sunFbm(p + vec3(5.2, 1.3, 2.8), seed);\n  float qz = sunFbm(p + vec3(1.7, 9.2, 4.3), seed);\n  vec3 q = vec3(qx, qy, qz);\n  float m = sunFbm(p + q * 0.9, seed);\n  float ql = length(q - 0.5);\n  float mm = m * m;\n  vec3 col = vec3(1.0, 0.30 + 0.63 * mm, 0.72 * mm);\n  float rk = clamp(ql * 0.9, 0.0, 1.0) * 0.65;\n  col = mix(col, vec3(0.82, 0.07, 0.0), rk);\n  col *= 1.35;\n  outColor = vec4(col, 1.0);\n}'
+  const SUN_FACES = [
+    [0, 0, -1, 0, -1, 0, 1, 0, 0],
+    [0, 0, 1, 0, -1, 0, -1, 0, 0],
+    [1, 0, 0, 0, 0, 1, 0, 1, 0],
+    [1, 0, 0, 0, 0, -1, 0, -1, 0],
+    [1, 0, 0, 0, -1, 0, 0, 0, 1],
+    [-1, 0, 0, 0, -1, 0, 0, 0, -1]
+  ]
+  let sunBakeProg = null
+  let sunBakeU = null
+  let sunBakeVao = null
+  let sunBakeOk = false
+  let sunBakeTried = false
+  function ensureSunBake(){
+    if(sunBakeTried) return sunBakeOk
+    sunBakeTried = true
+    try{
+      const vs = compile(gl.VERTEX_SHADER, vsSunBake)
+      const fs = compile(gl.FRAGMENT_SHADER, fsSunBake)
+      if(!vs || !fs) return false
+      const p = gl.createProgram()
+      if(!p) return false
+      gl.attachShader(p, vs)
+      gl.attachShader(p, fs)
+      gl.linkProgram(p)
+      if(!gl.getProgramParameter(p, gl.LINK_STATUS)) return false
+      sunBakeProg = p
+      const uB = gl.getUniformLocation(p, 'u_basis')
+      const uS = gl.getUniformLocation(p, 'u_seed')
+      if(!uB || !uS) return false
+      sunBakeU = { basis: uB, seed: uS }
+      sunBakeVao = gl.createVertexArray()
+      sunBakeOk = true
+      return true
+    }catch(eB){ return false }
+  }
+  function bakeSunTextureGPU(mi){
+    if(!ensureSunBake()) return false
+    const edge = SUN_TEX_EDGE
+    const tex = gl.createTexture()
+    if(!tex) return false
+    try{
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex)
+      for(let f=0;f<6;f++) gl.texImage2D(CUBE_FACES[f][1], 0, gl.RGBA, edge, edge, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      const fbo = gl.createFramebuffer()
+      const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING)
+      const prevVp = gl.getParameter(gl.VIEWPORT)
+      const wasDepth = gl.isEnabled(gl.DEPTH_TEST)
+      const wasBlend = gl.isEnabled(gl.BLEND)
+      gl.disable(gl.DEPTH_TEST)
+      gl.disable(gl.BLEND)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+      gl.viewport(0, 0, edge, edge)
+      gl.bindVertexArray(sunBakeVao)
+      gl.useProgram(sunBakeProg)
+      try{ gl.uniform1ui(sunBakeU.seed, hashStr('sun') >>> 0) }catch(eU){ gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo); return false }
+      const basis = new Float32Array(9)
+      let okFaces = true
+      for(let f=0;f<6;f++){
+        for(let i=0;i<9;i++) basis[i] = SUN_FACES[f][i]
+        gl.uniformMatrix3fv(sunBakeU.basis, false, basis)
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, CUBE_FACES[f][1], tex, 0)
+        let st = 0
+        try{ st = gl.checkFramebufferStatus(gl.FRAMEBUFFER) }catch(eS){ st = 0 }
+        if(st !== gl.FRAMEBUFFER_COMPLETE){ okFaces = false; break }
+        gl.drawArrays(gl.TRIANGLES, 0, 3)
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo)
+      gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3])
+      gl.bindVertexArray(null)
+      if(wasDepth) gl.enable(gl.DEPTH_TEST)
+      if(wasBlend) gl.enable(gl.BLEND)
+      try{ gl.deleteFramebuffer(fbo) }catch(eF){}
+      if(!okFaces){ try{ gl.deleteTexture(tex) }catch(eD){} return false }
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+      try{ gl.generateMipmap(gl.TEXTURE_CUBE_MAP) }catch(eG){ try{ gl.deleteTexture(tex) }catch(eD2){} return false }
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, null)
+      meshTex[mi] = {t: tex, ok: true}
+      impCache[mi] = null
+      return true
+    }catch(e){ try{ gl.deleteTexture(tex) }catch(eD3){} return false }
+  }
+  function genSunTexture(mi){
+    try{ if(bakeSunTextureGPU(mi)) return }catch(e){}
+    genSunTextureCPU(mi)
+  }
   const procTexQueue = []
   for(let qi = 0; qi < meshPlanets.length; qi++){
     if(PROC_AST.has(bodies[meshPlanets[qi]].id)) procTexQueue.push(meshPlanets[qi])
   }
   if(sunIdx >= 0) procTexQueue.unshift(sunIdx)
+  __readyState.procTotal = procTexQueue.length
+  __updateBootProgress()
   function captureImpostor(mi, mpx, mpy, mpz, mrr, irr, dirx, diry, dirz){
     const pv = planetVAO[mi]
     if(!pv) return false
@@ -2152,7 +2835,13 @@
     updateOrbitalPositions()
     updateAxisLines()
     if(focusedIdx >= 0){
-      const fx = posRaw[focusedIdx*3], fy = posRaw[focusedIdx*3+1], fz = posRaw[focusedIdx*3+2]
+      let fx, fy, fz
+      if(focusedIdx >= N){
+        const s = focusedIdx - N
+        fx = hgPosRaw[s*3]; fy = hgPosRaw[s*3+1]; fz = hgPosRaw[s*3+2]
+      } else {
+        fx = posRaw[focusedIdx*3]; fy = posRaw[focusedIdx*3+1]; fz = posRaw[focusedIdx*3+2]
+      }
       if(animActive){
         animEndTarget[0] = fx; animEndTarget[1] = fy; animEndTarget[2] = fz
       } else {
@@ -2210,6 +2899,21 @@
       let sFade = (smed - sEdge0) / Math.max(sEdge1 - sEdge0, 1e-12)
       sFade = sFade < 0 ? 0 : (sFade > 1 ? 1 : sFade)
       sunFade = sFade * sFade * (3 - 2 * sFade)
+      const sunDpc = (smed / worldScale) / PC_KM
+      const sunMag = 4.83 + 5.0 * Math.log10(Math.max(sunDpc, 1e-12)) - 5.0
+      const sunScale = (typeof window.STAR_SCALE === 'number' && window.STAR_SCALE > 0) ? window.STAR_SCALE : 1
+      const sunMinPx = (typeof window.STAR_MIN_PX === 'number' && window.STAR_MIN_PX > 0) ? window.STAR_MIN_PX : 0.7
+      const sunPxK = proj[5] * 0.5 * canvas.height
+      const sunBase = Math.max(0.0005, 0.05 * Math.pow(10, -0.2 * sunMag))
+      const sunStarPx = sunPxK * sunBase * sunScale / 15.0
+      const sunStarA = Math.PI * 0.25 * Math.pow(Math.max(sunStarPx, sunMinPx), 2.0)
+      const sunQR = (radQuad[sunIdx] > 0 && smed > 1e-9) ? radQuad[sunIdx] : 0
+      const sunQPx = 2.0 * sunQR * sunPxK / Math.max(smed, 1e-9)
+      const sunSunPx = (typeof window.SUN_STAR_PX === 'number' && window.SUN_STAR_PX > 0) ? window.SUN_STAR_PX : 10
+      const sunQA = Math.PI * 0.25 * Math.pow(Math.max(sunQPx, sunSunPx), 2.0)
+      let sunAlpha = 0.3 * sunStarA / Math.max(sunQA, 1e-12)
+      sunAlpha = sunAlpha < 0 ? 0 : (sunAlpha > 1 ? 1 : sunAlpha)
+      sunFade *= sunAlpha
       radQuad[sunIdx] = smed > sEdge0 ? radData[sunIdx] * 2 : 0
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, rbufQ)
@@ -2224,12 +2928,31 @@
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     const starMult = (typeof window.STAR_SIZE_MULT === 'number' && window.STAR_SIZE_MULT > 0) ? window.STAR_SIZE_MULT : 6
     const starSpeed = (typeof window.STAR_SPEED === 'number' && window.STAR_SPEED >= 0) ? window.STAR_SPEED : 0.05
+    if(hgProgOk && hgDraw > 0){
+      gl.depthMask(false)
+      gl.disable(gl.DEPTH_TEST)
+      gl.useProgram(progHg)
+      gl.uniformMatrix4fv(locViewHg, false, viewL)
+      gl.uniformMatrix4fv(locProjHg, false, proj)
+      if(locResHg) gl.uniform2f(locResHg, canvas.width, canvas.height)
+      if(locScaleHg) gl.uniform1f(locScaleHg, (typeof window.STAR_SCALE === 'number' && window.STAR_SCALE > 0) ? window.STAR_SCALE : 1)
+      if(locMinPxHg) gl.uniform1f(locMinPxHg, (typeof window.STAR_MIN_PX === 'number' && window.STAR_MIN_PX > 0) ? window.STAR_MIN_PX : 0.7)
+      if(locTimeHg) gl.uniform1f(locTimeHg, performance.now() * 0.001)
+      if(locSpeedHg) gl.uniform1f(locSpeedHg, starSpeed)
+      if(locFocusHg) gl.uniform1i(locFocusHg, (focusedIdx >= N) ? (focusedIdx - N) : -1)
+      gl.bindVertexArray(hgVao)
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, hgDraw)
+      gl.bindVertexArray(null)
+      gl.enable(gl.DEPTH_TEST)
+      gl.depthMask(true)
+    }
     gl.useProgram(prog)
     gl.uniformMatrix4fv(locView, false, viewL)
     gl.uniformMatrix4fv(locProj, false, proj)
     if(locStarMult) gl.uniform1f(locStarMult, starMult)
     if(locRes) gl.uniform2f(locRes, canvas.width, canvas.height)
     if(locMinPx) gl.uniform1f(locMinPx, (typeof window.SUN_STAR_PX === 'number' && window.SUN_STAR_PX > 0) ? window.SUN_STAR_PX : 10)
+    if(locFocus) gl.uniform1i(locFocus, (focusedIdx >= 0 && focusedIdx < N) ? focusedIdx : -1)
     gl.bindVertexArray(vao)
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, N)
     gl.bindVertexArray(null)
@@ -2243,6 +2966,7 @@
     if(locTimeP) gl.uniform1f(locTimeP, performance.now() * 0.001)
     if(locSpeedP) gl.uniform1f(locSpeedP, starSpeed)
     if(locStarMultP) gl.uniform1f(locStarMultP, starMult)
+    if(locFocusP) gl.uniform1i(locFocusP, (focusedIdx >= 0 && focusedIdx < N) ? focusedIdx : -1)
     gl.bindVertexArray(vaoP)
     gl.drawArrays(gl.POINTS, 0, N)
     gl.bindVertexArray(null)
@@ -2441,6 +3165,7 @@
       if(locStarMultStar) gl.uniform1f(locStarMultStar, starMult)
       if(locResStar) gl.uniform2f(locResStar, canvas.width, canvas.height)
       if(locMinPxStar) gl.uniform1f(locMinPxStar, (typeof window.SUN_STAR_PX === 'number' && window.SUN_STAR_PX > 0) ? window.SUN_STAR_PX : 10)
+      if(locFocusStar) gl.uniform1i(locFocusStar, (focusedIdx >= 0 && focusedIdx < N) ? focusedIdx : -1)
       gl.bindVertexArray(vao)
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, N)
       gl.bindVertexArray(null)
@@ -2476,8 +3201,25 @@
         if(bodies[qmi].id === 'sun') genSunTexture(qmi)
         else genProcTexture(qmi)
       }catch(eG){}
+      __readyState.procDone++
+      __updateBootProgress()
     }
     drawPlanetLabels()
+    try{
+      const texReady = __readyState.texDone >= __readyState.texTotal
+      const procReady = procTexQueue.length === 0 && __readyState.procDone >= __readyState.procTotal
+      if(texReady && procReady && __readyState.fontsDone && lineData.length > 0){
+        __readyState.warmupDone++
+        __updateBootProgress()
+        if(__readyState.warmupDone >= __readyState.warmupNeed && window.__SIDERALIS_READY !== true){
+          window.__SIDERALIS_READY = true
+          window.__SIDERALIS_PROGRESS = 1
+          try{ window.dispatchEvent(new Event('sideralis-ready')) }catch(eE){}
+        }
+      } else {
+        __updateBootProgress()
+      }
+    }catch(eR){}
     requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)
@@ -2497,10 +3239,18 @@
     set hovered(v){ hovered = v },
     get animActive(){ return animActive },
     set animActive(v){ animActive = v },
-    get minDist(){ return (focusedIdx >= 0 && radData[focusedIdx] > 0) ? Math.max(0.0000001, radData[focusedIdx] * 1.05) : 0.0000001 },
+    get minDist(){
+      let r = 0
+      if(focusedIdx >= 0){
+        if(focusedIdx >= N) r = hgRad[focusedIdx - N]
+        else if(radData[focusedIdx] > 0) r = radData[focusedIdx]
+      }
+      return r > 0 ? Math.max(0.0000001, r * 1.05) : 0.0000001
+    },
     get wireS(){ return wireS },
     set wireS(v){ wireS = v },
     sunIdx: sunIdx,
+    bodyCount: N,
     updateView: updateView,
     resize: resize,
     normalize: normalize,
@@ -2508,6 +3258,7 @@
     pick: pick,
     pickLabel: pickLabel,
     animateTo: animateTo,
+    animateHome: animateHome,
     refreshLabel: refreshLabel
   }
   initInput(inputApi)

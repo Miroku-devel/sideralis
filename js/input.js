@@ -9,6 +9,10 @@ function initInput(api){
   let lastY = 0
   let downX = 0
   let downY = 0
+  function goSolar(){
+    api.animateHome()
+    api.hovered=-1; api.refreshLabel()
+  }
   api.canvas.addEventListener('mousedown', e=>{
     if(e.button===0){ dragging=true; panning=false; zooming=false }
     else if(e.button===1){ dragging=false; panning=false; zooming=true }
@@ -32,10 +36,12 @@ function initInput(api){
       if(api.elevation < -lim) api.elevation = -lim
       api.updateView()
     } else if(zooming){
-      const f = Math.exp(dy * 0.008)
-      api.distance *= f
-      if(api.distance < api.minDist) api.distance = api.minDist
-      if(api.distance > 15) api.distance = 15
+      if(api.focusedIdx < api.bodyCount){
+        const f = Math.exp(dy * 0.008)
+        api.distance *= f
+        if(api.distance < api.minDist) api.distance = api.minDist
+        if(api.distance > 15) api.distance = 15
+      }
       api.updateView()
     } else if(panning){
       const eye = [
@@ -52,12 +58,14 @@ function initInput(api){
       api.target[1] += (-right[1]*dx + upC[1]*dy) * s
       api.target[2] += (-right[2]*dx + upC[2]*dy) * s
       api.updateView()
+      if(api.focusedIdx >= api.bodyCount){ goSolar(); return }
       if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
     }
   })
   api.canvas.addEventListener('wheel', e=>{
     e.preventDefault()
     api.animActive=false
+    if(api.focusedIdx >= api.bodyCount) return
     const factor = Math.exp(-e.deltaY * 0.0011)
     api.distance *= 1 / factor
     if(api.distance < api.minDist) api.distance = api.minDist
@@ -74,6 +82,7 @@ function initInput(api){
   let tapY = 0
   let tapT = 0
   api.canvas.addEventListener('touchstart', e=>{
+    e.preventDefault()
     api.animActive=false
     if(e.touches.length===1){ dragging=true; panning=false; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; touchSingleOrbit = api.focusedIdx >= 0; tapActive=true; tapX=e.touches[0].clientX; tapY=e.touches[0].clientY; tapT=performance.now() }
     else if(e.touches.length===2){
@@ -116,6 +125,7 @@ function initInput(api){
         api.target[1] += (-right[1]*dx + upC[1]*dy) * s
         api.target[2] += (-right[2]*dx + upC[2]*dy) * s
         api.updateView()
+        if(api.focusedIdx >= api.bodyCount){ goSolar(); return }
         if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
       }
     } else if(e.touches.length===2){
@@ -126,10 +136,12 @@ function initInput(api){
       const d = Math.hypot(dx,dy)
       let moved = false
       if(pinchDist>0){
-        api.distance = pinchStartDist * pinchDist / d
-        if(api.distance < api.minDist) api.distance = api.minDist
-        if(api.distance > 15) api.distance = 15
-        moved = true
+        if(api.focusedIdx < api.bodyCount){
+          api.distance = pinchStartDist * pinchDist / d
+          if(api.distance < api.minDist) api.distance = api.minDist
+          if(api.distance > 15) api.distance = 15
+          moved = true
+        }
       }
       const angle = Math.atan2(dy, dx)
       let da = angle - lastAngle
@@ -153,28 +165,41 @@ function initInput(api){
       if(moved) api.updateView()
     }
   }, {passive:false})
+  let touchTapHandled = false
+  let touchTapAt = 0
   function handleTouchTap(cx, cy){
     const rect = api.canvas.getBoundingClientRect()
     const mx = cx - rect.left
     const my = cy - rect.top
     const li = api.pickLabel(mx, my)
-    if(li >= 0){ api.animateTo(li); return }
+    if(li >= 0){
+      if(li === api.focusedIdx){ if(api.focusedIdx >= api.bodyCount) goSolar(); else { api.focusedIdx = -1; api.refreshLabel() } }
+      else api.animateTo(li)
+      return
+    }
     const idx = api.pick(mx, my)
-    if(idx >= 0) api.animateTo(idx)
-    else if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
+    if(idx >= 0){
+      if(idx === api.focusedIdx){ if(api.focusedIdx >= api.bodyCount) goSolar(); else { api.focusedIdx = -1; api.refreshLabel() } }
+      else api.animateTo(idx)
+    }
   }
   api.canvas.addEventListener('touchend', e=>{
+    e.preventDefault()
     if(e.touches.length===0){
       dragging=false; pinchDist=0
       if(tapActive){
         tapActive=false
         const dt = performance.now() - tapT
         const t = e.changedTouches && e.changedTouches[0]
-        if(t && dt < 500 && Math.hypot(t.clientX - tapX, t.clientY - tapY) <= 10) handleTouchTap(t.clientX, t.clientY)
+        if(t && dt < 500 && Math.hypot(t.clientX - tapX, t.clientY - tapY) <= 10){
+          touchTapHandled = true
+          touchTapAt = performance.now()
+          handleTouchTap(t.clientX, t.clientY)
+        }
       }
     }
     else if(e.touches.length===1){ dragging=true; panning=false; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; touchSingleOrbit = api.focusedIdx >= 0; tapActive=false }
-  })
+  }, {passive:false})
   api.canvas.addEventListener('touchcancel', e=>{
     if(e.touches.length===0){ dragging=false; pinchDist=0; tapActive=false }
     else if(e.touches.length===1){ dragging=true; panning=false; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; touchSingleOrbit = api.focusedIdx >= 0; tapActive=false }
@@ -190,6 +215,8 @@ function initInput(api){
   })
   api.canvas.addEventListener('mouseleave', ()=>{ api.hovered=-1; api.refreshLabel() })
   api.canvas.addEventListener('click', e=>{
+    if(touchTapHandled && performance.now() - touchTapAt < 700){ touchTapHandled = false; return }
+    touchTapHandled = false
     const rect = api.canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
@@ -200,6 +227,7 @@ function initInput(api){
     if(li >= 0){ api.animateTo(li); return }
     const idx = api.pick(mx, my)
     if(idx >= 0) api.animateTo(idx)
+    else if(api.focusedIdx >= api.bodyCount) goSolar()
     else if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
   })
   window.addEventListener('keydown', e=>{
@@ -207,10 +235,6 @@ function initInput(api){
     if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
     if(e.key==='a' || e.key==='A'){
       window.ATMO_ENABLED = window.ATMO_ENABLED === false
-    }
-    if(e.key==='r' || e.key==='R'){
-      api.target=[0,0,0]; api.distance=5.76; api.azimuth=0.85; api.elevation=0.55; api.updateView()
-      api.focusedIdx = -1; api.hovered = -1; api.refreshLabel()
     }
     if(e.key==='z' || e.key==='Z'){ api.wireS = !api.wireS }
     if(e.key==='x' || e.key==='X'){ window.SHOW_FPS = window.SHOW_FPS !== true }

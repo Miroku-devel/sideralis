@@ -313,12 +313,7 @@ const TITAN_ATMO = BP(2576.0, 2676.0, [9.0e-3, 4.5e-3, 2.0e-3], 16.0, [2.0, 1.2,
     return (typeof window.CLOUD_COVER === 'number') ? window.CLOUD_COVER : 0.9;
   }
   function bakeClouds(bakeProg, cover) {
-    let coarse = false;
-    try {
-      if (typeof window.CLOUD_BAKE === 'number') coarse = false;
-      else if (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) coarse = true;
-    } catch (er) {}
-    const size = (typeof window.CLOUD_BAKE === 'number' && window.CLOUD_BAKE > 0) ? Math.floor(window.CLOUD_BAKE) : (coarse ? 128 : 256);
+    const size = (typeof window.CLOUD_BAKE === 'number' && window.CLOUD_BAKE > 0) ? Math.floor(window.CLOUD_BAKE) : 256;
     const bu = {};
     const names = ['u_basis', 'u_cover', 'u_seedA', 'u_t'];
     for (let i = 0; i < names.length; i++) bu[names[i]] = G.getUniformLocation(bakeProg, names[i]);
@@ -346,17 +341,47 @@ const TITAN_ATMO = BP(2576.0, 2676.0, [9.0e-3, 4.5e-3, 2.0e-3], 16.0, [2.0, 1.2,
     G.bindVertexArray(bakeVao);
     G.useProgram(bakeProg);
     G.uniform1f(bu['u_cover'], cover);
-    G.uniform1f(bu['u_seedA'], cloudSeed);
     const basis = new Float32Array(9);
     let tries = 0;
     let coverage = 0;
+    let solidity = 0;
     let fboComplete = false;
     let px = null;
     try { px = new Uint8Array(size * size * 4); } catch (erM) { px = null; }
-    while (tries < 3) {
+    const MAX_TRIES = 20;
+    const GRID = 64;
+    const MSIZE = 64;
+    const FACE_POLE = [0, 0, 1, -1, 0, 0];
+    const gridMask = new Uint8Array(GRID * GRID);
+    const gridSeen = new Uint8Array(GRID * GRID);
+    const gridStack = new Int32Array(GRID * GRID);
+    const gridCoreM = new Uint8Array(GRID * GRID);
+    const blockCov = new Uint16Array(96);
+    let bestScore = Infinity;
+    let bestSeedA = cloudSeed;
+    let bestT = 1.7;
+    let bestCoverage = 0;
+    let bestSolidity = 0;
+    let bestCloudBlob = 0;
+    let bestCoreBlob = 0;
+    let bestFill = 1;
+    let bestWhite = 0;
+    let bestFaceWhite = 0;
+    let bestMinFace = 0;
+    let bestHemi = 0;
+    let bestComp = 0;
+    let bestShare = 0;
+    let bestPatch = 1;
+    let bestOk = false;
+    const passers = [];
+    while (tries < MAX_TRIES) {
       tries++;
-      G.uniform1f(bu['u_t'], 1.7 + Math.random() * 20.0);
+      const seedA = (tries === 1) ? cloudSeed : (Math.random() * Math.PI * 2);
+      const tCan = 1.7 + Math.random() * 20.0;
+      G.uniform1f(bu['u_seedA'], seedA);
+      G.uniform1f(bu['u_t'], tCan);
       fboComplete = true;
+      G.viewport(0, 0, MSIZE, MSIZE);
       for (let f = 0; f < 6; f++) {
         for (let i = 0; i < 9; i++) basis[i] = CLOUD_FACES[f][i];
         G.uniformMatrix3fv(bu['u_basis'], false, basis);
@@ -366,18 +391,219 @@ const TITAN_ATMO = BP(2576.0, 2676.0, [9.0e-3, 4.5e-3, 2.0e-3], 16.0, [2.0, 1.2,
         if (st !== G.FRAMEBUFFER_COMPLETE) { fboComplete = false; break; }
         G.drawArrays(G.TRIANGLES, 0, 3);
       }
-      if (!fboComplete || !px) { coverage = 0; continue; }
-      try {
-        G.framebufferTexture2D(G.FRAMEBUFFER, G.COLOR_ATTACHMENT0, CLOUD_TARGETS[0], tex, 0);
-        G.readPixels(0, 0, size, size, G.RGBA, G.UNSIGNED_BYTE, px);
-      } catch (erR) { coverage = 0; continue; }
-      let hit = 0;
-      const total = size * size;
-      for (let o = 0; o < px.length; o += 4) if (px[o] > 26) hit++;
-      coverage = total > 0 ? hit / total : 0;
-      if (coverage > 0.02) break;
+      if (!fboComplete || !px) { continue; }
+      let cov = 0, solid = 0, white = 0;
+      let covN = 0, covS = 0;
+      let okAll = true;
+      let worstFaceCov = 0;
+      let minFaceCov = 1;
+      let worstFaceSol = 0;
+      let worstFaceWhite = 0;
+      let worstCloudBlob = 0;
+      let worstCoreBlob = 0;
+      let worstFill = 1;
+      let nComp = 0;
+      let worstBlobCells = 0;
+      blockCov.fill(0);
+      for (let f = 0; f < 6; f++) {
+        try {
+          G.framebufferTexture2D(G.FRAMEBUFFER, G.COLOR_ATTACHMENT0, CLOUD_TARGETS[f], tex, 0);
+          G.readPixels(0, 0, MSIZE, MSIZE, G.RGBA, G.UNSIGNED_BYTE, px);
+        } catch (erR) { okAll = false; break; }
+        let fCov = 0, fSolid = 0, fWhite = 0;
+        const pole = FACE_POLE[f];
+        for (let yy = 0; yy < MSIZE; yy++) {
+          const north = pole > 0 ? true : (pole < 0 ? false : (yy < MSIZE / 2));
+          for (let xx = 0; xx < MSIZE; xx++) {
+            const o4 = (yy * MSIZE + xx) * 4;
+            const r = px[o4];
+            const gi = yy * GRID + xx;
+            if (r > 26) {
+              cov++;
+              fCov++;
+              gridMask[gi] = 1;
+              blockCov[f * 16 + (yy >> 4) * 4 + (xx >> 4)]++;
+              if (north) covN++; else covS++;
+              if (r > 180) { solid++; fSolid++; gridCoreM[gi] = 1; }
+              else gridCoreM[gi] = 0;
+              if (r > 235) { white++; fWhite++; }
+            } else {
+              gridMask[gi] = 0;
+              gridCoreM[gi] = 0;
+            }
+            gridSeen[gi] = 0;
+          }
+        }
+        const fN = MSIZE * MSIZE;
+        const fCovF = fN > 0 ? fCov / fN : 0;
+        const fSolF = fCov > 0 ? fSolid / fCov : 0;
+        const fWhiteF = fN > 0 ? fWhite / fN : 0;
+        if (fCovF > worstFaceCov) worstFaceCov = fCovF;
+        if (fCovF < minFaceCov) minFaceCov = fCovF;
+        if (fSolF > worstFaceSol) worstFaceSol = fSolF;
+        if (fWhiteF > worstFaceWhite) worstFaceWhite = fWhiteF;
+        const cloudCells = fCov;
+        let maxBlob = 0;
+        for (let ci = 0; ci < GRID * GRID; ci++) {
+          if (!gridMask[ci] || gridSeen[ci]) continue;
+          nComp++;
+          let sp = 0, sz = 0;
+          gridStack[sp++] = ci;
+          gridSeen[ci] = 1;
+          while (sp > 0) {
+            const cur = gridStack[--sp];
+            sz++;
+            const cx = cur % GRID, cy = (cur / GRID) | 0;
+            if (cx > 0) { const nb = cur - 1; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cx + 1 < GRID) { const nb = cur + 1; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cy > 0) { const nb = cur - GRID; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cy + 1 < GRID) { const nb = cur + GRID; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+          }
+          if (sz > maxBlob) maxBlob = sz;
+        }
+        const blobF = cloudCells > 0 ? maxBlob / (GRID * GRID) : 0;
+        if (blobF > worstCloudBlob) worstCloudBlob = blobF;
+        if (maxBlob > worstBlobCells) worstBlobCells = maxBlob;
+        let edgeCells = 0;
+        if (cloudCells >= 80) {
+          for (let ci = 0; ci < GRID * GRID; ci++) {
+            if (!gridMask[ci]) continue;
+            const cx = ci % GRID, cy = (ci / GRID) | 0;
+            let edge = 0;
+            if (cx === 0 || !gridMask[ci - 1]) edge = 1;
+            else if (cx + 1 >= GRID || !gridMask[ci + 1]) edge = 1;
+            else if (cy === 0 || !gridMask[ci - GRID]) edge = 1;
+            else if (cy + 1 >= GRID || !gridMask[ci + GRID]) edge = 1;
+            if (edge) edgeCells++;
+          }
+          const edgeRatio = cloudCells > 0 ? edgeCells / cloudCells : 1;
+          if (edgeRatio < worstFill) worstFill = edgeRatio;
+        }
+        for (let ci = 0; ci < GRID * GRID; ci++) {
+          gridMask[ci] = gridCoreM[ci];
+          gridSeen[ci] = 0;
+        }
+        let maxCore = 0;
+        for (let ci = 0; ci < GRID * GRID; ci++) {
+          if (!gridMask[ci] || gridSeen[ci]) continue;
+          let sp = 0, sz = 0;
+          gridStack[sp++] = ci;
+          gridSeen[ci] = 1;
+          while (sp > 0) {
+            const cur = gridStack[--sp];
+            sz++;
+            const cx = cur % GRID, cy = (cur / GRID) | 0;
+            if (cx > 0) { const nb = cur - 1; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cx + 1 < GRID) { const nb = cur + 1; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cy > 0) { const nb = cur - GRID; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+            if (cy + 1 < GRID) { const nb = cur + GRID; if (gridMask[nb] && !gridSeen[nb]) { gridSeen[nb] = 1; gridStack[sp++] = nb; } }
+          }
+          if (sz > maxCore) maxCore = sz;
+        }
+        const coreF = maxCore / (GRID * GRID);
+        if (coreF > worstCoreBlob) worstCoreBlob = coreF;
+      }
+      if (!okAll) { continue; }
+      const total = MSIZE * MSIZE * 6;
+      coverage = total > 0 ? cov / total : 0;
+      solidity = cov > 0 ? solid / cov : 0;
+      const whiteFrac = total > 0 ? white / total : 0;
+      const hemiTot = covN + covS;
+      const hemiFrac = hemiTot > 0 ? Math.min(covN, covS) / hemiTot : 1;
+      const blobShare = cov > 0 ? worstBlobCells / cov : 0;
+      let patchMean = 0;
+      for (let bi = 0; bi < 96; bi++) patchMean += blockCov[bi] / 256;
+      patchMean /= 96;
+      let patchVar = 0;
+      for (let bi = 0; bi < 96; bi++) {
+        const d = blockCov[bi] / 256 - patchMean;
+        patchVar += d * d;
+      }
+      const patchStd = Math.sqrt(patchVar / 96);
+      const okCover = coverage >= 0.30 && coverage <= 0.70;
+      const okSolid = solidity <= 0.25;
+      const okFaces = worstFaceCov <= 0.98 && worstFaceSol <= 0.45;
+      const okBlob = worstCloudBlob <= 0.95 && worstCoreBlob <= 0.30;
+      const okEdge = worstFill >= 0.12;
+      const okWhite = whiteFrac <= 0.06 && worstFaceWhite <= 0.15;
+      const okBalance = true;
+      const okHemi = hemiFrac >= 0.40;
+      const okScatter = nComp >= 8 && blobShare <= 0.55;
+      const score = Math.abs(coverage - 0.50) * 2.0 + Math.max(0, solidity - 0.08) * 2.0 +
+        (coverage > 0.70 ? (coverage - 0.70) * 8.0 : 0) +
+        (coverage < 0.30 ? (0.30 - coverage) * 8.0 : 0) +
+        (worstFaceCov > 0.95 ? (worstFaceCov - 0.95) * 8.0 : 0) +
+        (worstFaceSol > 0.45 ? (worstFaceSol - 0.45) * 8.0 : 0) +
+        (worstCloudBlob > 0.90 ? (worstCloudBlob - 0.90) * 6.0 : 0) +
+        (worstCoreBlob > 0.20 ? (worstCoreBlob - 0.20) * 8.0 : 0) +
+        (worstFill < 0.14 ? (0.14 - worstFill) * 12.0 : 0) +
+        (whiteFrac > 0.05 ? (whiteFrac - 0.05) * 14.0 : 0) +
+        (worstFaceWhite > 0.12 ? (worstFaceWhite - 0.12) * 14.0 : 0) +
+        (worstFaceCov - minFaceCov) * 0.8 +
+        (hemiFrac < 0.40 ? (0.40 - hemiFrac) * 10.0 : 0) +
+        (nComp < 8 ? (8 - nComp) * 0.25 : 0) +
+        (blobShare > 0.55 ? (blobShare - 0.55) * 8.0 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        bestSeedA = seedA;
+        bestT = tCan;
+        bestCoverage = coverage;
+        bestSolidity = solidity;
+        bestCloudBlob = worstCloudBlob;
+        bestCoreBlob = worstCoreBlob;
+        bestFill = worstFill;
+        bestWhite = whiteFrac;
+        bestFaceWhite = worstFaceWhite;
+        bestMinFace = minFaceCov;
+        bestHemi = hemiFrac;
+        bestComp = nComp;
+        bestShare = blobShare;
+        bestPatch = patchStd;
+        bestOk = okCover && okSolid && okFaces && okBlob && okEdge && okWhite && okBalance && okHemi && okScatter;
+        if (bestOk) passers.push({ seedA: seedA, t: tCan, coverage: coverage, solidity: solidity, cloudBlob: worstCloudBlob, coreBlob: worstCoreBlob, fill: worstFill, white: whiteFrac, faceWhite: worstFaceWhite, minFace: minFaceCov, hemi: hemiFrac, comp: nComp, share: blobShare, patch: patchStd });
+      }
+      if (bestOk && passers.length >= 6) break;
+      if (okCover && okSolid && okFaces && okBlob && okEdge && okWhite && okBalance && okHemi && okScatter) break;
     }
-    try { window.CLOUD_STATUS = { baked: fboComplete, tries: tries, coverage: coverage, size: size }; } catch (erC) {}
+    if (passers.length > 0) {
+      const pick = passers[(Math.random() * passers.length) | 0];
+      bestSeedA = pick.seedA;
+      bestT = pick.t;
+      bestCoverage = pick.coverage;
+      bestSolidity = pick.solidity;
+      bestCloudBlob = pick.cloudBlob;
+      bestCoreBlob = pick.coreBlob;
+      bestFill = pick.fill;
+      bestWhite = pick.white;
+      bestFaceWhite = pick.faceWhite;
+      bestMinFace = pick.minFace;
+      bestHemi = pick.hemi;
+      bestComp = pick.comp;
+      bestShare = pick.share;
+      bestPatch = pick.patch;
+      bestOk = true;
+    }
+    cloudSeed = bestSeedA;
+    coverage = bestCoverage;
+    solidity = bestSolidity;
+    if (bestOk || bestScore < Infinity) {
+      G.useProgram(bakeProg);
+      G.uniform1f(bu['u_cover'], cover);
+      G.uniform1f(bu['u_seedA'], bestSeedA);
+      G.uniform1f(bu['u_t'], bestT);
+      fboComplete = true;
+      G.viewport(0, 0, size, size);
+      for (let f = 0; f < 6; f++) {
+        for (let i = 0; i < 9; i++) basis[i] = CLOUD_FACES[f][i];
+        G.uniformMatrix3fv(bu['u_basis'], false, basis);
+        G.framebufferTexture2D(G.FRAMEBUFFER, G.COLOR_ATTACHMENT0, CLOUD_TARGETS[f], tex, 0);
+        let st = 0;
+        try { st = G.checkFramebufferStatus(G.FRAMEBUFFER); } catch (erS2) { st = 0; }
+        if (st !== G.FRAMEBUFFER_COMPLETE) { fboComplete = false; break; }
+        G.drawArrays(G.TRIANGLES, 0, 3);
+      }
+    }
+    try { window.CLOUD_STATUS = { baked: fboComplete, tries: tries, coverage: bestCoverage, solidity: bestSolidity, cloudBlob: bestCloudBlob, coreBlob: bestCoreBlob, fill: bestFill, white: bestWhite, faceWhite: bestFaceWhite, minFace: bestMinFace, hemi: bestHemi, comp: bestComp, share: bestShare, patch: bestPatch, size: size }; } catch (erC) {}
     G.activeTexture(G.TEXTURE0);
     G.bindTexture(G.TEXTURE_CUBE_MAP, tex);
     G.texParameteri(G.TEXTURE_CUBE_MAP, G.TEXTURE_MIN_FILTER, G.LINEAR_MIPMAP_LINEAR);

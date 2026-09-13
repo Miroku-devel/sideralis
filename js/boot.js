@@ -1,9 +1,13 @@
 (async () => {
   "use strict";
-  
   const bar = document.getElementById('bootbar')
   const boot = document.getElementById('boot')
-  const set = (f) => { bar.style.width = (f * 100).toFixed(1) + '%' }
+  let lastSet = 0
+  const setRaw = (f) => { bar.style.width = (f * 100).toFixed(1) + '%' }
+  const set = (f) => {
+    f = Math.max(0, Math.min(1, f))
+    if (f > lastSet) { lastSet = f; setRaw(f) }
+  }
   function showGlError () {
     const wrap = document.createElement('div')
     wrap.className = 'gl-error-wrap'
@@ -26,7 +30,7 @@
     s.textContent = code
     document.body.appendChild(s)
   }
-  function loadSrc (src) {
+  function loadSrcCounted (src) {
     return new Promise((res, rej) => {
       let attempts = 0
       function tryLoad () {
@@ -43,16 +47,42 @@
       tryLoad()
     })
   }
-  function loadJSList (list, f0, f1) {
+  function fetchTracked (url) {
+    return new Promise((res, rej) => {
+      let retries = 1
+      function attempt () {
+        const xhr = new XMLHttpRequest()
+        xhr.open('GET', url, true)
+        xhr.responseType = 'text'
+        xhr.onprogress = e => {
+          const cb = fetchTracked._cb
+          if (typeof cb === 'function') cb(url, e.loaded, e.lengthComputable ? e.total : 0)
+        }
+        xhr.onload = () => {
+          if (xhr.status === 200 || xhr.status === 0) {
+            const cb = fetchTracked._cb
+            if (typeof cb === 'function') cb(url, xhr.responseText.length, xhr.responseText.length)
+            res(xhr.responseText)
+          } else if (retries > 0) { retries--; attempt() }
+          else rej(new Error('load ' + url))
+        }
+        xhr.onerror = () => {
+          if (retries > 0) { retries--; attempt() }
+          else rej(new Error('load ' + url))
+        }
+        xhr.send()
+      }
+      attempt()
+    })
+  }
+  async function loadListBytesReal (list, f0, f1) {
     if (window.location.protocol === 'file:') {
       set(f0)
-      let chain = Promise.resolve()
-      list.forEach((src, idx) => {
-        chain = chain.then(() => loadSrc(src)).then(() => {
-          set(f0 + (f1 - f0) * (idx + 1) / list.length)
-        })
-      })
-      return chain
+      for (let idx = 0; idx < list.length; idx++) {
+        await loadSrcCounted(list[idx])
+        set(f0 + (f1 - f0) * (idx + 1) / list.length)
+      }
+      return null
     }
     const items = list.map(src => ({ src: src, loaded: 0, total: 0, done: false, text: '' }))
     const upd = () => {
@@ -62,42 +92,59 @@
         if (it.total > 0) { L += Math.min(it.loaded, it.total); T += it.total }
         else if (it.done) { L += it.loaded; T += it.loaded }
       }
-      if (T > 0) set(f0 + (f1 - f0) * L / T)
+      if (T > 0) set(f0 + (f1 - f0) * 0.9 * L / T)
     }
-    return Promise.all(items.map(it => new Promise((res, rej) => {
-      let retries = 1
-      function attempt () {
-        const xhr = new XMLHttpRequest()
-        xhr.open('GET', it.src, true)
-        xhr.responseType = 'text'
-        xhr.onprogress = e => {
-          it.loaded = e.loaded
-          if (e.lengthComputable) it.total = e.total
-          upd()
+    fetchTracked._cb = (url, loaded, total) => {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].src === url) {
+          items[i].loaded = loaded
+          if (total > 0) items[i].total = total
+          break
         }
-        xhr.onload = () => {
-          if (xhr.status === 200 || xhr.status === 0) {
-            it.loaded = xhr.responseText.length
-            it.done = true
-            if (!it.total) it.total = it.loaded
-            it.text = xhr.responseText
-            upd()
-            res()
-          } else if (retries > 0) { retries--; attempt() }
-          else rej(new Error('load ' + it.src))
-        }
-        xhr.onerror = () => {
-          if (retries > 0) { retries--; attempt() }
-          else rej(new Error('load ' + it.src))
-        }
-        xhr.send()
       }
-      attempt()
-    }))).then(() => {
-      for (let i = 0; i < items.length; i++) execJS(items[i].text)
-    })
+      upd()
+    }
+    try {
+      await Promise.all(items.map(it => new Promise((res, rej) => {
+        let retries = 1
+        function attempt () {
+          const xhr = new XMLHttpRequest()
+          xhr.open('GET', it.src, true)
+          xhr.responseType = 'text'
+          xhr.onprogress = e => {
+            it.loaded = e.loaded
+            if (e.lengthComputable) it.total = e.total
+            upd()
+          }
+          xhr.onload = () => {
+            if (xhr.status === 200 || xhr.status === 0) {
+              it.loaded = xhr.responseText.length
+              it.done = true
+              if (!it.total) it.total = it.loaded
+              it.text = xhr.responseText
+              upd()
+              res()
+            } else if (retries > 0) { retries--; attempt() }
+            else rej(new Error('load ' + it.src))
+          }
+          xhr.onerror = () => {
+            if (retries > 0) { retries--; attempt() }
+            else rej(new Error('load ' + it.src))
+          }
+          xhr.send()
+        }
+        attempt()
+      })))
+    } finally {
+      fetchTracked._cb = null
+    }
+    const fExec = f0 + (f1 - f0) * 0.9
+    for (let i = 0; i < items.length; i++) {
+      execJS(items[i].text)
+      set(fExec + (f1 - fExec) * (i + 1) / items.length)
+    }
   }
-  async function b64ToBytes (b64, f0, f1) {
+  async function b64ToBytesReal (b64, f0, f1) {
     const total = Math.floor(b64.length * 3 / 4)
     const out = new Uint8Array(total)
     let o = 0
@@ -105,55 +152,83 @@
     for (let i = 0; i < b64.length; i += CH) {
       const part = atob(b64.slice(i, i + CH))
       for (let j = 0; j < part.length; j++) out[o++] = part.charCodeAt(j)
-      set(f0 + (f1 - f0) * Math.min(o, total) / total)
+      set(f0 + (f1 - f0) * Math.min(o, total) / Math.max(total, 1))
       await new Promise(r => setTimeout(r, 0))
     }
     return out.subarray(0, o)
   }
-  async function decompressBr (comp) {
+  async function decompressBrReal (comp) {
     if (typeof BrotliDecode === 'function') {
       return BrotliDecode(new Int8Array(comp.buffer, comp.byteOffset, comp.length))
     }
-    try {
+    let hasNative = false
+    try { new DecompressionStream('br'); hasNative = true } catch (eN) { hasNative = false }
+    if (hasNative) {
       return new Uint8Array(await new Response(
         new Blob([comp]).stream().pipeThrough(new DecompressionStream('br'))
       ).arrayBuffer())
-    } catch (e) {
-      await loadSrc('js/brotli.js')
+    }
+    if (window.location.protocol === 'file:') {
+      await loadSrcCounted('js/brotli.js')
       return BrotliDecode(new Int8Array(comp.buffer, comp.byteOffset, comp.length))
     }
+    const brotliText = await fetchTracked('js/brotli.js')
+    execJS(brotliText)
+    return BrotliDecode(new Int8Array(comp.buffer, comp.byteOffset, comp.length))
   }
-  async function loadBr (b64, f0, f1, f2) {
-    const comp = await b64ToBytes(b64, f0, f1)
-    set(f1 + 0.02)
-    const dec = await decompressBr(comp)
-    set(f2)
+  async function loadBrReal (b64, f0, f1) {
+    const comp = await b64ToBytesReal(b64, f0, f1)
+    const dec = await decompressBrReal(comp)
     execJS(new TextDecoder().decode(dec))
+    set(f1)
   }
   try {
-    set(0.02)
-    await new Promise(r => setTimeout(r, 30))
-    await loadBr(DATA_BR, 0.05, 0.12, 0.16)
-    await loadBr(TEXTURES_BR, 0.2, 0.62, 0.8)
-    set(0.84)
-    await loadSrc('js/icons.js')
-    await loadJSList([
+    set(0)
+    if (window.location.protocol === 'file:') {
+      await loadListBytesReal(['js/data.js', 'js/textures.js'], 0.0, 0.05)
+    } else {
+      await loadListBytesReal(['js/data.js', 'js/textures.js'], 0.0, 0.05)
+    }
+    await loadBrReal(DATA_BR, 0.05, 0.10)
+    await loadBrReal(TEXTURES_BR, 0.10, 0.50)
+    await loadListBytesReal([
+      'js/icons.js',
       'js/audio.js',
       'js/shaders.js',
       'js/atmosphere.js',
+      'js/input.js',
       'js/app.js',
       'js/ui.js',
       'js/search.js',
-      'js/sfx.js'
-    ], 0.84, 0.98)
-    set(0.98)
-    requestAnimationFrame(() => {
-      set(1)
-      boot.classList.add('done')
-      setTimeout(() => boot.remove(), 450)
-    })
+      'js/sfx.js',
+      'js/rotate.js'
+    ], 0.50, 0.85)
+    let lastP = 0.85
+    set(0.85)
+    for (;;) {
+      let ready = false
+      let p = 0
+      try {
+        ready = window.__SIDERALIS_READY === true
+        const rp = (typeof window.__SIDERALIS_PROGRESS === 'number' && isFinite(window.__SIDERALIS_PROGRESS)) ? window.__SIDERALIS_PROGRESS : 0
+        p = Math.max(0, Math.min(1, rp))
+      } catch (eR) {}
+      const target = 0.85 + (0.99 - 0.85) * p
+      if (target > lastP) {
+        lastP = target
+        set(lastP)
+      }
+      if (ready) break
+      await new Promise(r => setTimeout(r, 100))
+      await new Promise(r => requestAnimationFrame(r))
+    }
+    await new Promise(r => requestAnimationFrame(r))
+    await new Promise(r => requestAnimationFrame(r))
+    set(1)
+    boot.classList.add('done')
+    setTimeout(() => boot.remove(), 450)
   } catch (e) {
     boot.classList.add('err')
-    set(0)
+    setRaw(0)
   }
 })()

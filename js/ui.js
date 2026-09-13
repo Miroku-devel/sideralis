@@ -4,7 +4,7 @@ const homeBtn = document.getElementById('home')
 if(homeBtn && typeof ICONS !== 'undefined' && typeof ICONS.home === 'string'){
   homeBtn.innerHTML = ICONS.home
   homeBtn.addEventListener('click', () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', {key: 'r'}))
+    if(typeof window.DSS_HOME === 'function') window.DSS_HOME()
   })
 }
 const searchBtn = document.getElementById('search')
@@ -29,6 +29,10 @@ if(githubBtn && typeof ICONS !== 'undefined' && typeof ICONS.github === 'string'
   githubBtn.addEventListener('click', () => {
     window.open('https://github.com/Miroku-devel/sideralis', '_blank', 'noopener')
   })
+}
+const ipanelDlBtn = document.getElementById('ipanel-download')
+if(ipanelDlBtn && typeof ICONS !== 'undefined' && typeof ICONS.download === 'string'){
+  ipanelDlBtn.innerHTML = ICONS.download
 }
 const ipanelCloseBtn = document.getElementById('ipanel-close')
 if(ipanelCloseBtn && typeof ICONS !== 'undefined' && typeof ICONS.chevronup === 'string'){

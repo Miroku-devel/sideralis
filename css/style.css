@@ -100,7 +100,7 @@ canvas {
 #boot .bar {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #F808F8, #F8F8F8);
+  background: linear-gradient(90deg, #423E8B, #F8F8F8);
 }
 #boot.err .bar {
   background: #f87171;
@@ -217,7 +217,8 @@ body.orientation-locked #labels {
   border-top: 1px solid #2a3442;
   cursor: pointer;
 }
-#ipanel-close {
+#ipanel-close,
+#ipanel-download {
   background: none;
   border: none;
   color: #fff;
@@ -226,13 +227,15 @@ body.orientation-locked #labels {
   padding: 8px;
   text-shadow: none;
 }
-#ipanel-close svg {
+#ipanel-close svg,
+#ipanel-download svg {
   width: 20px;
   height: 20px;
   pointer-events: none;
 }
 @media (hover: hover) {
-  #ipanel-close:hover {
+  #ipanel-close:hover,
+  #ipanel-download:hover {
     color: #93a4bb;
   }
 }
@@ -286,7 +289,7 @@ body.orientation-locked #labels {
   opacity: .4;
 }
 #ipanel-body .abtn svg {
-  width: 14px;
+  width: 24px;
   height: 14px;
   display: block;
 }

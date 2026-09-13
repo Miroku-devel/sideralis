@@ -8,8 +8,11 @@ uniform mat4 u_proj;
 uniform float u_starMult;
 uniform vec2 u_resolution;
 uniform float u_starMinPx;
+uniform int u_focus;
 out vec3 v_color;
 out vec2 v_quad;
+out float v_focused;
+out float v_e;
 void main(){
   vec4 viewPos = u_view * vec4(a_pos, 1.0);
   float r = a_radius;
@@ -24,11 +27,19 @@ void main(){
   gl_Position = u_proj * viewPos;
   v_color = a_color;
   v_quad = a_quad;
+  v_focused = (gl_InstanceID == u_focus) ? 1.0 : 0.0;
+  bool eWhite = (a_color.r > 0.99 && a_color.g > 0.99 && a_color.b > 0.99);
+  bool eSun = !eWhite && (a_color.r > 0.99 && a_color.g > 0.90 && a_color.g < 0.94 && a_color.b > 0.18 && a_color.b < 0.22);
+  float eDepth = max(-viewPos.z, 1e-9);
+  float ePx = r * 2.0 * (u_proj[1][1] * 0.5 * u_resolution.y / eDepth);
+  float eCl = clamp(ePx, 0.0, 1.0);
+  v_e = eSun ? 1.0 : (eWhite ? eCl * eCl : 1.0);
 }`
 const fsSource = `#version 300 es
 precision highp float;
 in vec3 v_color;
 in vec2 v_quad;
+in float v_e;
 out vec4 outColor;
 void main(){
   bool isWhite = v_color.r > 0.99 && v_color.g > 0.99 && v_color.b > 0.99;
@@ -45,6 +56,8 @@ const fsStar = `#version 300 es
 precision highp float;
 in vec3 v_color;
 in vec2 v_quad;
+in float v_focused;
+in float v_e;
 uniform float u_time;
 uniform float u_starSpeed;
 uniform float u_sunSpeed;
@@ -71,7 +84,7 @@ void main(){
   float lum = s * tw;
   float d = length(v_quad);
   float fade = 1.0 - smoothstep(0.55, 1.0, d);
-  float a = clamp(lum, 0.0, 1.0) * fade;
+  float a = clamp(lum, 0.0, 1.0) * fade * (isSun ? 1.0 : mix(0.12 * v_e, 1.0, v_focused));
   if(a < 0.004) discard;
   outColor = vec4(vec3(1.0) * fade, a);
 }`
@@ -83,8 +96,13 @@ uniform mat4 u_view;
 uniform mat4 u_proj;
 uniform vec2 u_resolution;
 uniform float u_starMult;
+uniform int u_focus;
 out vec3 v_color;
+out float v_focused;
+out float v_e;
 void main(){
+  v_focused = (gl_VertexID == u_focus) ? 1.0 : 0.0;
+  v_e = 0.0;
   if(a_radius <= 0.0){
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
@@ -99,10 +117,14 @@ void main(){
   float s = clamp(sz / dist, 0.0, 6.0);
   gl_PointSize = s;
   v_color = a_color;
+  float eP = clamp(sz / max(dist, 1e-12), 0.0, 1.0);
+  v_e = eP * eP;
 }`
 const fsPoint = `#version 300 es
 precision highp float;
 in vec3 v_color;
+in float v_focused;
+in float v_e;
 uniform float u_time;
 uniform float u_starSpeed;
 out vec4 outColor;
@@ -126,7 +148,7 @@ void main(){
     float lum = s * tw;
     float d = length(c);
     float fade = 1.0 - smoothstep(0.55, 1.0, d);
-    float a = clamp(lum, 0.0, 1.0) * fade;
+    float a = clamp(lum, 0.0, 1.0) * fade * mix(0.12 * v_e, 1.0, v_focused);
     if(a < 0.004) discard;
     outColor = vec4(vec3(1.0) * fade, a);
     return;
@@ -529,9 +551,11 @@ function atmoGroundFSU() {
   '  if(rCam < u_atmoRg){\n' +
   '    vec3 l0 = normalize(u_sun - v_w);\n' +
   '    float ndotl = dot(n, l0);\n' +
-  '    float d0t = smoothstep(-0.1, 0.5, ndotl);\n' +
+  '    float d0t = smoothstep(-0.15, 0.5, ndotl);\n' +
   '    float d0 = d0t * d0t * d0t * (d0t * (d0t * 6.0 - 15.0) + 10.0);\n' +
-  '    outColor = vec4(base * d0, 1.0);\n' +
+  '    float term0 = smoothstep(-0.15, 0.12, ndotl) * (1.0 - smoothstep(0.12, 0.55, ndotl));\n' +
+  '    vec3 lit0 = mix(base, base * vec3(1.34, 0.58, 0.33) + vec3(0.04, 0.008, 0.0), term0 * 0.55);\n' +
+  '    outColor = vec4(lit0 * d0, 1.0);\n' +
   '    return;\n' +
   '  }\n' +
   '  vec3 fragLocal = n * u_atmoRg;\n' +
@@ -539,12 +563,14 @@ function atmoGroundFSU() {
   '  float viewLen = max(length(viewLocal), 1e-6);\n' +
   '  vec3 viewDir = viewLocal / viewLen;\n' +
   '  float muS = dot(n, sunDir);\n' +
-  '  float penT = smoothstep(-0.1, 0.5, muS);\n' +
+  '  float penT = smoothstep(-0.15, 0.5, muS);\n' +
   '  float ndlS = penT * penT * penT * (penT * (penT * 6.0 - 15.0) + 10.0);\n' +
   '  vec3 sunT = atmoTransTopSoft(u_atmoRg, muS);\n' +
   '  vec3 skyIrr = u_atmoSky * ndlS;\n' +
   '  vec3 albedo = pow(max(base, vec3(0.0)), vec3(2.2));\n' +
   '  vec3 groundRad = albedo * (1.0 / ATMO_PI) * (u_atmoSun * sunT * ndlS + skyIrr);\n' +
+  '  float termU = smoothstep(-0.15, 0.12, muS) * (1.0 - smoothstep(0.12, 0.55, muS));\n' +
+  '  groundRad = mix(groundRad, groundRad * vec3(1.34, 0.58, 0.33) + vec3(0.04, 0.008, 0.0) * ndlS, termU * 0.55);\n' +
   '  vec3 startLocal = camLocal;\n' +
   '  float segLen = viewLen;\n' +
   '  if(rCam > u_atmoRt){\n' +
@@ -585,9 +611,11 @@ function atmoGroundFS(P, sky) {
   '  if(rCam < ATMO_Rg){\n' +
   '    vec3 l0 = normalize(u_sun - v_w);\n' +
   '    float ndotl = dot(n, l0);\n' +
-  '    float d0t = smoothstep(-0.1, 0.5, ndotl);\n' +
+  '    float d0t = smoothstep(-0.15, 0.5, ndotl);\n' +
   '    float d0 = d0t * d0t * d0t * (d0t * (d0t * 6.0 - 15.0) + 10.0);\n' +
-  '    outColor = vec4(base * d0, 1.0);\n' +
+  '    float term0 = smoothstep(-0.15, 0.12, ndotl) * (1.0 - smoothstep(0.12, 0.55, ndotl));\n' +
+  '    vec3 lit0 = mix(base, base * vec3(1.34, 0.58, 0.33) + vec3(0.04, 0.008, 0.0), term0 * 0.55);\n' +
+  '    outColor = vec4(lit0 * d0, 1.0);\n' +
   '    return;\n' +
   '  }\n' +
   '  vec3 fragLocal = n * ATMO_Rg;\n' +
@@ -595,12 +623,14 @@ function atmoGroundFS(P, sky) {
   '  float viewLen = max(length(viewLocal), 1e-6);\n' +
   '  vec3 viewDir = viewLocal / viewLen;\n' +
   '  float muS = dot(n, sunDir);\n' +
-  '  float penT = smoothstep(-0.1, 0.5, muS);\n' +
+  '  float penT = smoothstep(-0.15, 0.5, muS);\n' +
   '  float ndlS = penT * penT * penT * (penT * (penT * 6.0 - 15.0) + 10.0);\n' +
   '  vec3 sunT = atmoTransTopSoft(ATMO_Rg, muS);\n' +
   '  vec3 skyIrr = vec3(' + atmoFloat(sky[0]) + ', ' + atmoFloat(sky[1]) + ', ' + atmoFloat(sky[2]) + ') * ndlS;\n' +
   '  vec3 albedo = pow(max(base, vec3(0.0)), vec3(2.2));\n' +
   '  vec3 groundRad = albedo * (1.0 / ATMO_PI) * (ATMO_SUN * sunT * ndlS + skyIrr);\n' +
+  '  float termU = smoothstep(-0.15, 0.12, muS) * (1.0 - smoothstep(0.12, 0.55, muS));\n' +
+  '  groundRad = mix(groundRad, groundRad * vec3(1.34, 0.58, 0.33) + vec3(0.04, 0.008, 0.0) * ndlS, termU * 0.55);\n' +
   '  vec3 startLocal = camLocal;\n' +
   '  float segLen = viewLen;\n' +
   '  if(rCam > ATMO_Rt){\n' +
@@ -686,27 +716,77 @@ function cloudFieldGLSL() {
   'float cloudFbm(vec3 p){\n' +
   '  float f = 0.0;\n' +
   '  f += 0.50000*cloudNoise(p); p = p*2.02;\n' +
-  '  f -= 0.25000*cloudNoise(p); p = p*2.03;\n' +
+  '  f += 0.25000*cloudNoise(p); p = p*2.03;\n' +
   '  f += 0.12500*cloudNoise(p); p = p*3.01;\n' +
   '  f += 0.06250*cloudNoise(p); p = p*3.04;\n' +
-  '  f += 0.03500*cloudNoise(p); p = p*4.01;\n' +
-  '  f += 0.01250*cloudNoise(p); p = p*4.04;\n' +
-  '  f -= 0.00125*cloudNoise(p);\n' +
+  '  f += 0.03125*cloudNoise(p); p = p*4.01;\n' +
+  '  f += 0.01562*cloudNoise(p);\n' +
   '  return f/0.984375;\n' +
   '}\n' +
-  'float cloudD(vec3 p){\n' +
-  '  p -= cloudFbm(vec3(p.x,p.y,0.0)*0.5)*1.25;\n' +
-  '  float a = min((cloudFbm(p*3.0)*2.2-1.1), 0.0);\n' +
-  '  return a*a;\n' +
+  'float cloudLat(float y){\n' +
+  '  float ay = abs(y);\n' +
+  '  float d1 = (y-0.10)/0.09;\n' +
+  '  float itcz = exp(-d1*d1)*0.16;\n' +
+  '  float d2 = (ay-0.68)/0.22;\n' +
+  '  float storm = exp(-d2*d2)*0.14;\n' +
+  '  float d3 = (ay-0.35)/0.13;\n' +
+  '  float sub = -exp(-d3*d3)*0.10;\n' +
+  '  float ps = smoothstep(0.68,0.97,-y)*0.30;\n' +
+  '  float pn = smoothstep(0.72,0.97,y)*0.12;\n' +
+  '  return itcz+storm+sub+ps+pn;\n' +
+  '}\n' +
+  'float cloudVort(vec3 d, float t){\n' +
+  '  float acc = 0.0;\n' +
+  '  for(int k=0;k<9;k++){\n' +
+  '    float fk = float(k);\n' +
+  '    float h1 = cloudHash(t*12.7+fk*78.23+0.13);\n' +
+  '    float h2 = cloudHash(t*7.3+fk*39.11+4.7);\n' +
+  '    float h3 = cloudHash(t*5.1+fk*55.37+9.1);\n' +
+  '    vec3 c = vec3(h1*2.0-1.0, h2*1.6-0.8, h3*2.0-1.0);\n' +
+  '    c = normalize(c);\n' +
+  '    float rad = 0.13+h1*0.14;\n' +
+  '    float dp = dot(d,c);\n' +
+  '    float ang = acos(clamp(dp,-1.0,1.0));\n' +
+  '    if(ang<rad*2.2){\n' +
+  '      vec3 tang = normalize(cross(c,vec3(0.0,1.0,0.0))+vec3(0.001,0.0,0.0));\n' +
+  '      vec3 bitv = normalize(cross(c,tang));\n' +
+  '      vec3 rel = d-c*dp;\n' +
+  '      float u = dot(rel,tang)/rad;\n' +
+  '      float v = dot(rel,bitv)/rad;\n' +
+  '      float r = sqrt(u*u+v*v);\n' +
+  '      float a = atan(v,u);\n' +
+  '      float spiral = sin(a*2.5+r*7.0-h3*6.2831853);\n' +
+  '      float arm = exp(-r*r*2.0)*(0.5+0.5*spiral*exp(-r*1.0));\n' +
+  '      float latw = 1.0-smoothstep(0.85,0.98,abs(c.y));\n' +
+  '      acc += arm*exp(-ang*ang/(rad*rad))*latw;\n' +
+  '    }\n' +
+  '  }\n' +
+  '  return acc;\n' +
   '}\n' +
   'float cloudsEarth(vec3 d, float t){\n' +
+  '  float ay = abs(d.y);\n' +
+  '  float stretch = 1.5+1.0*smoothstep(0.60,0.95,ay);\n' +
   '  vec3 flow = vec3(t*0.15, t*0.04, t*0.08);\n' +
-  '  float ic = cloudD(d*0.25 + flow) / 0.6;\n' +
-  '  if (ic < 0.05) return 0.0;\n' +
-  '  float init = smoothstep(0.1, 1.0, ic);\n' +
-  '  init = init * cloudD(d*0.75 + flow) * ic;\n' +
-  '  init = init * (cloudD(d*1.35 + flow)*0.5 + 0.4) * init;\n' +
-  '  return init;\n' +
+  '  vec3 wq1 = vec3(d.x*1.7+flow.x*0.2, d.y*3.0+flow.y*0.2, d.z*1.7+flow.z*0.2+t*0.03);\n' +
+  '  vec3 wq2 = vec3(d.x*3.4+5.2+flow.x*0.2, d.y*6.4+flow.y*0.2, d.z*3.4+flow.z*0.2-t*0.02);\n' +
+  '  float w1 = cloudFbm(wq1);\n' +
+  '  float w2 = cloudFbm(wq2);\n' +
+  '  vec3 warp = vec3(w1-0.5, w2-0.5, (w1+w2)*0.5-0.5)*1.3;\n' +
+  '  vec3 p = vec3(d.x*3.0+warp.x*1.5+flow.x, d.y*stretch*3.0+warp.y*1.5+flow.y, d.z*3.0+warp.z*1.5+flow.z);\n' +
+  '  float base = cloudFbm(p);\n' +
+  '  float rg0 = cloudFbm(p*2.3+warp*1.0+vec3(3.7,0.0,0.0));\n' +
+  '  float ridge = 1.0-abs(rg0*2.0-1.0);\n' +
+  '  ridge = ridge*ridge*ridge;\n' +
+  '  float d1n = cloudNoise(d*vec3(8.0,14.0,8.0)+flow*2.5+warp*3.0);\n' +
+  '  float d2n = cloudFbm(d*vec3(10.0,20.0,10.0)+flow*3.0);\n' +
+  '  float det = d1n*0.65+d2n*0.35;\n' +
+  '  float vort = cloudVort(d,t);\n' +
+  '  float yw = clamp(d.y+warp.y*0.5+(w1-0.5)*0.3,-1.0,1.0);\n' +
+  '  float lat = cloudLat(yw);\n' +
+  '  float low = base*0.55+ridge*0.28+lat+vort*0.30;\n' +
+  '  low = pow(max(low,0.0),1.7);\n' +
+  '  float raw = low*(0.40+1.02*det)+det*0.06-0.12;\n' +
+  '  return raw;\n' +
   '}\n';
 }
 const vsQuadBake = '#version 300 es\n' +
@@ -732,7 +812,7 @@ function cloudBakeFS() {
   '  d = vec3(ca*d.x + sa*d.z, d.y, -sa*d.x + ca*d.z);\n' +
   '  float thr = (1.0-u_cover);\n' +
   '  float c = cloudsEarth(d, u_t);\n' +
-  '  float covA = smoothstep(thr, thr + 0.15, c);\n' +
+  '  float covA = smoothstep(thr, thr + 0.55, c);\n' +
   '  float shade = clamp(1.0 - exp(-max(c - thr, 0.0) * 3.0), 0.0, 1.0);\n' +
   '  outColor = vec4(covA, shade, 0.0, 1.0);\n' +
   '}';
@@ -752,7 +832,7 @@ function cloudRenderFS() {
   'out vec4 outColor;\n' +
   'void main(){\n' +
   '  vec3 d = normalize(v_dir0);\n' +
-  '  float ra = u_time*0.0015 + u_seed;\n' +
+  '  float ra = u_time*0.00375 + u_seed;\n' +
   '  float ca = cos(ra), sa = sin(ra);\n' +
   '  d = vec3(ca*d.x + sa*d.z, d.y, -sa*d.x + ca*d.z);\n' +
   '  vec4 tx = texture(u_clouds, d);\n' +
@@ -764,14 +844,15 @@ function cloudRenderFS() {
   '  float penT = smoothstep(-0.3, 0.5, dot(n, l));\n' +
   '  float day = penT*penT*penT*(penT*(penT*6.0-15.0)+10.0);\n' +
   '  if (day < 0.003) discard;\n' +
-  '  vec3 col = mix(vec3(0.64, 0.68, 0.79), vec3(1.02, 1.0, 0.96), tx.g);\n' +
+  '  vec3 col = mix(vec3(0.80, 0.82, 0.90), vec3(1.02, 1.0, 0.96), tx.g);\n' +
   '  col += vec3(0.08, 0.075, 0.07) * clamp(fwidth(tx.r) * 5.0, 0.0, 1.0);\n' +
-  '  float warmBand = smoothstep(0.0, 0.10, day) * (1.0 - smoothstep(0.10, 0.45, day));\n' +
-  '  col = mix(col, vec3(1.0, 0.55, 0.30), warmBand * 0.65);\n' +
-  '  col *= (0.06 + 0.94*day);\n' +
+  '  float warmBand = smoothstep(-0.02, 0.14, day) * (1.0 - smoothstep(0.14, 0.55, day));\n' +
+  '  col = mix(col, vec3(1.0, 0.42, 0.19), warmBand * 0.80);\n' +
+  '  float nightFade = smoothstep(0.0, 0.45, day);\n' +
+  '  col *= nightFade * (0.15 + 0.85*day);\n' +
   '  float limb = smoothstep(0.0, 0.3, dot(n, vv));\n' +
   '  float nearFade = smoothstep(0.0, u_radius * 0.08, length(u_cam - v_w));\n' +
-  '  outColor = vec4(col, smoothstep(0.01, 0.18, day) * limb * tx.r * nearFade);\n' +
+  '  outColor = vec4(col, smoothstep(0.0, 0.25, day) * limb * tx.r * nearFade);\n' +
   '}';
 }
 function cloudShadowFS() {
@@ -807,7 +888,7 @@ function cloudShadowFS() {
   '  float tOut = -b + sdt;\n' +
   '  float tF = tIn > 0.0 ? tIn : tOut;\n' +
   '  if (tF <= 0.0) discard;\n' +
-  '  float ra = u_time * 0.0015 + u_seed;\n' +
+  '  float ra = u_time * 0.00375 + u_seed;\n' +
   '  float ca = cos(ra);\n' +
   '  float sa = sin(ra);\n' +
   '  vec3 dF = u_frame * normalize(P + l * tF);\n' +
@@ -892,4 +973,78 @@ void main(){
   } else {
     outColor = vec4(rgbB, 1.0);
   }
+}`
+const vsStars = `#version 300 es
+in vec3 a_pos;
+in vec2 a_quad;
+in float a_radius;
+in vec3 a_color;
+in float a_mix;
+in float a_phase;
+uniform mat4 u_view;
+uniform mat4 u_proj;
+uniform vec2 u_resolution;
+uniform float u_scale;
+uniform float u_minPx;
+uniform int u_focus;
+out vec3 v_color;
+out vec2 v_quad;
+out float v_mix;
+out float v_phase;
+out float v_focused;
+out float v_e;
+void main(){
+  vec4 viewPos = u_view * vec4(a_pos, 1.0);
+  float depth = max(-viewPos.z, 1e-9);
+  float pxPerWorld = u_proj[1][1] * 0.5 * u_resolution.y / depth;
+  float r = a_radius * u_scale;
+  float pxSize = r * 2.0 * pxPerWorld;
+  float eCl = clamp(pxSize / u_minPx, 0.0, 1.0);
+  v_e = eCl * eCl;
+  if(pxSize < u_minPx) r *= (u_minPx / max(pxSize, 1e-9));
+  viewPos.xy += a_quad * r;
+  gl_Position = u_proj * viewPos;
+  v_color = a_color;
+  v_quad = a_quad;
+  v_mix = a_mix;
+  v_phase = a_phase;
+  v_focused = (gl_InstanceID == u_focus) ? 1.0 : 0.0;
+}`
+const fsStars = `#version 300 es
+precision highp float;
+in vec3 v_color;
+in vec2 v_quad;
+in float v_mix;
+in float v_phase;
+in float v_focused;
+in float v_e;
+uniform float u_time;
+uniform float u_speed;
+out vec4 outColor;
+float cheap_star(vec2 uv, float anim)
+{
+    uv = abs(uv);
+    vec2 pos = min(uv.xy/uv.yx, anim);
+    float p = (2.0 - pos.x - pos.y);
+    return (2.0+p*(p*p-1.5)) / max(uv.x+uv.y, 1e-4);
+}
+void main(){
+  float d = length(v_quad);
+  if(d > 1.0) discard;
+  float aa = fwidth(d);
+  float fade = 1.0 - smoothstep(0.55, 1.0, d);
+  vec3 discCol = v_color * (0.9 + 0.1 * (1.0 - d));
+  float st = u_time * u_speed + v_phase;
+  float anim = sin(st * 12.0) * 0.02 + 1.0;
+  float sc = 2.0 * (cos(st * 2.0) - 2.5);
+  sc = -9.1 + (sc + 5.0) * 0.05;
+  vec2 suv = v_quad * sc;
+  float s = cheap_star(suv, anim);
+  float tw = 0.85 + 0.15 * sin(st * 6.0);
+  vec3 starCol = v_color * 0.72 + vec3(1.0) * 0.18;
+  vec3 col = mix(discCol, starCol, v_mix);
+  float crossA = clamp(s * tw, 0.0, 1.0) * fade;
+  float a = mix(fade, crossA, v_mix) * mix(0.3 * v_e, 1.0, v_focused);
+  if(a < 0.003) discard;
+  outColor = vec4(col, a);
 }`
