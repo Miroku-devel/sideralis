@@ -22,4 +22,5 @@ Project contents are licensed under the [Apache License 2.0](./LICENSE).
 |-------|---------|
 | Inter Tight font (`fonts/`) | [SIL Open Font License 1.1](https://scripts.sil.org/OFL) |
 | Ephemeris data (NASA JPL Horizons, SSD, NSSDCA) | Public Domain |
+| HYG stellar database v4.4 (astronexus) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | Sounds of Space | Public Domain |
