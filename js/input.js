@@ -167,21 +167,30 @@ function initInput(api){
   }, {passive:false})
   let touchTapHandled = false
   let touchTapAt = 0
+  function deselectFocused(){
+    if(api.focusedIdx >= api.bodyCount) goSolar()
+    else if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
+  }
   function handleTouchTap(cx, cy){
     const rect = api.canvas.getBoundingClientRect()
     const mx = cx - rect.left
     const my = cy - rect.top
     const li = api.pickLabel(mx, my)
     if(li >= 0){
-      if(li === api.focusedIdx){ if(api.focusedIdx >= api.bodyCount) goSolar(); else { api.focusedIdx = -1; api.refreshLabel() } }
+      if(li === api.focusedIdx) deselectFocused()
       else api.animateTo(li)
+      return
+    }
+    if(api.focusedIdx >= 0 && api.hitsFocused && api.hitsFocused(mx, my)){
+      deselectFocused()
       return
     }
     const idx = api.pick(mx, my)
     if(idx >= 0){
-      if(idx === api.focusedIdx){ if(api.focusedIdx >= api.bodyCount) goSolar(); else { api.focusedIdx = -1; api.refreshLabel() } }
+      if(idx === api.focusedIdx) deselectFocused()
       else api.animateTo(idx)
     }
+    else deselectFocused()
   }
   api.canvas.addEventListener('touchend', e=>{
     e.preventDefault()
@@ -220,15 +229,25 @@ function initInput(api){
     const rect = api.canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
-    const dx = Math.abs(mx - downX)
-    const dy = Math.abs(my - downY)
+    const dx = Math.abs(e.clientX - downX)
+    const dy = Math.abs(e.clientY - downY)
     if(dx > 4 || dy > 4) return
     const li = api.pickLabel(mx, my)
-    if(li >= 0){ api.animateTo(li); return }
+    if(li >= 0){
+      if(li === api.focusedIdx) deselectFocused()
+      else api.animateTo(li)
+      return
+    }
+    if(api.focusedIdx >= 0 && api.hitsFocused && api.hitsFocused(mx, my)){
+      deselectFocused()
+      return
+    }
     const idx = api.pick(mx, my)
-    if(idx >= 0) api.animateTo(idx)
-    else if(api.focusedIdx >= api.bodyCount) goSolar()
-    else if(api.focusedIdx >= 0){ api.focusedIdx = -1; api.refreshLabel() }
+    if(idx >= 0){
+      if(idx === api.focusedIdx) deselectFocused()
+      else api.animateTo(idx)
+    }
+    else deselectFocused()
   })
   window.addEventListener('keydown', e=>{
     const t = e.target

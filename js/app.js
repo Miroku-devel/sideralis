@@ -2197,6 +2197,8 @@
     const minRad = coarsePtr ? TOUCH_MIN_R * cssScale : 8
     let best = -1
     let bestD = 1e9
+    let occBest = -1
+    let occDist = Infinity
     for(let i=0;i<N;i++){
       const x = posData[i*3]
       const y = posData[i*3+1]
@@ -2221,6 +2223,10 @@
       const dist = Math.hypot(vx, vy, vz)
       let pr = 0
       if(dist > 0) pr = r * f / dist * h * 0.5
+      if(pr > 0 && d2 < pr*pr){
+        if(dist < occDist){ occDist = dist; occBest = i }
+        continue
+      }
       let ps = r * h * 0.5 * 380.0 / dist
       if(ps < 1.5) ps = 1.5
       if(ps > 6) ps = 6
@@ -2228,10 +2234,10 @@
       if(pr < ps) rad = ps
       if(rad < minRad) rad = minRad
       if(d2 < rad*rad){
-        const d = Math.hypot(ndcx, ndcy)
         if(d2 < bestD){ bestD = d2; best = i }
       }
     }
+    if(occBest >= 0) return occBest
     for(let s=0;s<hgDraw;s++){
       if(hgMag[s] > HG_PICK_MAG) continue
       const x = hgPos[s*3], y = hgPos[s*3+1], z = hgPos[s*3+2]
@@ -2257,6 +2263,58 @@
       }
     }
     return best
+  }
+  function hitsFocused(mx, my){
+    if(focusedIdx < 0) return false
+    const w = canvas.width
+    const h = canvas.height
+    if(!w || !h) return false
+    const cw = canvas.clientWidth || 1
+    const ch = canvas.clientHeight || 1
+    const f = proj[5]
+    const cssScale = w / cw
+    const minRad = coarsePtr ? TOUCH_MIN_R * cssScale : 8
+    const px = mx * (w / cw)
+    const py = my * (h / ch)
+    let x, y, z, trueR
+    if(focusedIdx >= N){
+      const s = focusedIdx - N
+      if(s < 0 || s >= hgN) return false
+      x = hgPos[s*3]; y = hgPos[s*3+1]; z = hgPos[s*3+2]
+      trueR = hgRad[s]
+    } else {
+      x = posData[focusedIdx*3]; y = posData[focusedIdx*3+1]; z = posData[focusedIdx*3+2]
+      trueR = radData[focusedIdx]
+    }
+    const vx = viewL[0]*x + viewL[4]*y + viewL[8]*z + viewL[12]
+    const vy = viewL[1]*x + viewL[5]*y + viewL[9]*z + viewL[13]
+    const vz = viewL[2]*x + viewL[6]*y + viewL[10]*z + viewL[14]
+    const vw = viewL[3]*x + viewL[7]*y + viewL[11]*z + viewL[15]
+    if(vz > -Math.max(distance * 1e-6, 1e-12)) return false
+    const cx = proj[0]*vx + proj[4]*vy + proj[8]*vz + proj[12]*vw
+    const cy = proj[1]*vx + proj[5]*vy + proj[9]*vz + proj[13]*vw
+    const cwq = proj[3]*vx + proj[7]*vy + proj[11]*vz + proj[15]*vw
+    if(cwq === 0) return false
+    const ndcx = cx / cwq
+    const ndcy = cy / cwq
+    const sx = (ndcx * 0.5 + 0.5) * w
+    const sy = (1.0 - (ndcy * 0.5 + 0.5)) * h
+    const dx = sx - px
+    const dy = sy - py
+    const d2 = dx*dx + dy*dy
+    const dist = Math.hypot(vx, vy, vz)
+    let tol = 0
+    if(dist > 0 && trueR > 0) tol = trueR * f / dist * h * 0.5
+    if(focusedIdx < N && dist > 0){
+      let ps = trueR * h * 0.5 * 380.0 / dist
+      if(!(ps >= 0)) ps = 0
+      if(ps < 1.5) ps = 1.5
+      if(ps > 6) ps = 6
+      if(tol < ps) tol = ps
+    }
+    if(!(tol > 0)) tol = minRad
+    if(tol < minRad) tol = minRad
+    return d2 < tol*tol
   }
   function animateTo(idx){
     let tx, ty, tz, r
@@ -3257,6 +3315,7 @@
     cross: cross,
     pick: pick,
     pickLabel: pickLabel,
+    hitsFocused: hitsFocused,
     animateTo: animateTo,
     animateHome: animateHome,
     refreshLabel: refreshLabel
